@@ -1,0 +1,16 @@
+{
+  "name": "观影手记",
+  "short_name": "观影手记",
+  "description": "记录我看过的电影：时间、心得、台词、最美定格与评论",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#f3fbf9",
+  "theme_color": "#bfe3e0",
+  "icons": [
+    { "src": "assets/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "assets/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
