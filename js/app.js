@@ -2,7 +2,17 @@
 window.App = window.App || {};
 
 (function () {
+  // 开屏动画：约 1.2s 后淡出移除（尊重系统「减弱动效」）
+  function hideSplash() {
+    const sp = document.getElementById('splash');
+    if (!sp) return;
+    const rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (rm && rm.matches) { sp.remove(); return; }
+    setTimeout(() => { sp.classList.add('hide'); setTimeout(() => sp.remove(), 400); }, 900);
+  }
+
   function boot() {
+    hideSplash();
     App.db.open()
       .then(() => App.views.list.init())
       .then(() => {

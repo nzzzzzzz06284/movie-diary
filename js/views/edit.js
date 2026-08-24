@@ -49,7 +49,7 @@ App.views.edit = (function () {
     root.innerHTML = `
       <h2 style="margin:4px 2px 14px">${param ? '编辑《' + App.util.escapeHtml(rec.title) + '》' : '添加电影'}</h2>
       <div class="field"><label>观影时间（可添加多次，二刷三刷都记上）</label>
-        <div id="dateList" class="chips"></div>
+        <div id="dateList" class="date-list"></div>
         <div class="row" style="margin-top:8px">
           <input type="date" id="newDate" value="${App.util.today()}">
           <button class="btn sm" id="addDate" style="flex:0 0 auto">＋ 添加时间</button>
@@ -76,22 +76,46 @@ App.views.edit = (function () {
 
     starPicker('fStars');
     renderTags();
-    let dates = App.util.entries(rec).map(e => e.watchDate);
+    let entriesData = (App.util.entries(rec).length ? App.util.entries(rec) : [{ seq: 1, watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [] }])
+      .map(e => ({
+        watchDate: e.watchDate || '',
+        rating: e.rating || 0,
+        review: e.review || '',
+        comment: e.comment || '',
+        quotes: e.quotes || [],
+        dateUnknown: !!e.dateUnknown,
+        dateNote: e.dateNote || ''
+      }));
     function renderDates() {
       const box = document.getElementById('dateList');
       if (!box) return;
-      box.innerHTML = dates.map((d, i) => `<span class="chip ${i === dates.length - 1 ? 'active' : ''}" style="display:inline-flex;align-items:center;gap:6px">${App.util.entryLabel(i + 1)} ${App.util.fmtDate(d)}<span class="x" data-i="${i}" style="cursor:pointer;color:var(--danger)">✕</span></span>`).join('') || '<span class="muted">还没有观影时间</span>';
-      box.querySelectorAll('.x').forEach(x => x.onclick = () => {
-        dates.splice(+x.dataset.i, 1);
-        if (!dates.length) dates.push(App.util.today());
+      box.innerHTML = entriesData.map((e, i) => `
+        <div class="date-row">
+          <span class="date-label">${App.util.entryLabel(i + 1)}</span>
+          <input type="date" class="date-input" data-i="${i}" value="${e.watchDate || App.util.today()}" ${e.dateUnknown ? 'disabled' : ''}>
+          <label class="unk-toggle sm"><input type="checkbox" data-unk="${i}" ${e.dateUnknown ? 'checked' : ''}> 记不清</label>
+          <input type="text" class="date-note" data-note="${i}" placeholder="大概什么时候" value="${App.util.escapeHtml(e.dateNote || '')}" ${e.dateUnknown ? '' : 'style="display:none"'}>
+          <span class="x" data-del="${i}" style="cursor:pointer;color:var(--danger)">✕</span>
+        </div>`).join('') || '<span class="muted">还没有观影时间</span>';
+      box.querySelectorAll('input.date-input').forEach(inp => inp.onchange = () => { entriesData[+inp.dataset.i].watchDate = inp.value; });
+      box.querySelectorAll('input[data-unk]').forEach(cb => cb.onchange = () => {
+        const i = +cb.dataset.unk; entriesData[i].dateUnknown = cb.checked;
+        const row = cb.closest('.date-row');
+        row.querySelector('.date-input').disabled = cb.checked;
+        row.querySelector('.date-note').style.display = cb.checked ? '' : 'none';
+      });
+      box.querySelectorAll('input.date-note').forEach(inp => inp.oninput = () => { entriesData[+inp.dataset.note].dateNote = inp.value; });
+      box.querySelectorAll('.x[data-del]').forEach(x => x.onclick = () => {
+        entriesData.splice(+x.dataset.del, 1);
+        if (!entriesData.length) entriesData.push({ watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [], dateUnknown: false, dateNote: '' });
         renderDates();
       });
     }
     renderDates();
     document.getElementById('addDate').onclick = () => {
-      const v = document.getElementById('newDate').value;
-      if (!v) return App.util.toast('先选个日期');
-      dates.push(v); renderDates();
+      const v = document.getElementById('newDate').value || App.util.today();
+      entriesData.push({ watchDate: v, rating: 0, review: '', comment: '', quotes: [], dateUnknown: false, dateNote: '' });
+      renderDates();
     };
     document.getElementById('addTag').onclick = addTag;
     document.getElementById('newTag').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } };
@@ -116,16 +140,20 @@ App.views.edit = (function () {
     document.getElementById('saveBtn').onclick = () => {
       const reviewVal = document.getElementById('fReview').value;
       const commentVal = document.getElementById('fComment').value;
-      rec.entries = dates.map((d, i) => {
+      rec.entries = entriesData.map((e, i) => {
         const ex = (rec.entries || [])[i];
-        if (i === 0) {
-          return { seq: 1, watchDate: d, rating: rating, review: reviewVal, comment: commentVal,
-                   quotes: ex ? ex.quotes : (firstEntry ? firstEntry.quotes : []) };
-        }
-        return { seq: i + 1, watchDate: d, rating: ex ? ex.rating : 0, review: ex ? ex.review : '',
-                 comment: ex ? ex.comment : '', quotes: ex ? ex.quotes : [] };
+        return {
+          seq: i + 1,
+          watchDate: e.dateUnknown ? '' : (e.watchDate || ''),
+          rating: i === 0 ? rating : (ex ? ex.rating : 0),
+          review: i === 0 ? reviewVal : (ex ? ex.review : ''),
+          comment: i === 0 ? commentVal : (ex ? ex.comment : ''),
+          quotes: ex ? ex.quotes : (i === 0 && firstEntry ? firstEntry.quotes : []),
+          dateUnknown: e.dateUnknown,
+          dateNote: e.dateNote
+        };
       });
-      rec.watchDates = dates.slice().sort();
+      rec.watchDates = rec.entries.map(e => e.watchDate).filter(Boolean).sort();
       rec.watchedDate = rec.watchDates[rec.watchDates.length - 1] || '';
       rec.rating = rating;
       rec.review = reviewVal;

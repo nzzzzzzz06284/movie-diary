@@ -150,7 +150,7 @@ App.views.list = (function () {
         title: seed.title || '未命名',
         posterUrl: seed.posterUrl || '',
         overview: seed.overview || '',
-        director: '', cast: [], castInfo: [], rating: rating || 0,
+        director: '', cast: [], rating: rating || 0,
         review: '', comment: '', tags: [], quotes: [],
         tmdbId: seed.tmdbId || '',
         entries: [{ seq: 1, watchDate: date, rating: rating || 0, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? note : '' }],
@@ -160,7 +160,7 @@ App.views.list = (function () {
       // 点选时自动补全导演 / 演员，确保资料正确
       if (enrich && seed.tmdbId && key) {
         App.tmdb.details(seed.tmdbId, key)
-          .then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || []; finish(rec); })
+          .then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || []; finish(rec); })
           .catch(() => finish(rec));
       } else finish(rec);
     };

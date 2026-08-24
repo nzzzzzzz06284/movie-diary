@@ -369,7 +369,7 @@ body.dark-view .app-title{color:rgba(255,255,255,.96);}
 .gfx-hero.wall-collapsed{transform:translateY(-100%);opacity:0;pointer-events:none;}
 
 /* 海报墙（环形容器 + transform 滑动，零 DOM 重建） */
-.gfx-wall-wrap{position:relative;height:calc(100vw * .72);max-height:330px;min-height:210px;display:flex;align-items:center;justify-content:center;perspective:900px;overflow:hidden;background:linear-gradient(180deg,#e9f6f3,var(--bg));}
+.gfx-wall-wrap{position:relative;height:calc(100vw * .88);max-height:400px;min-height:200px;display:flex;align-items:center;justify-content:center;perspective:900px;overflow:hidden;background:linear-gradient(180deg,#e9f6f3,var(--bg));}
 .gfx-wall{position:relative;width:100%;height:100%;will-change:transform;}
 .gfx-card{position:absolute;left:50%;top:50%;width:134px;aspect-ratio:2/3;margin:-100px 0 0 -67px;border-radius:12px;overflow:hidden;background:rgba(255,255,255,.72);border:1px solid var(--border);box-shadow:var(--shadow-md);transition:transform .45s cubic-bezier(.22,.8,.35,1),opacity .45s ease,box-shadow .35s ease;}
 .gfx-card img{width:100%;height:100%;object-fit:cover;display:block;}
@@ -380,7 +380,7 @@ body.dark-view .app-title{color:rgba(255,255,255,.96);}
 @media (prefers-reduced-motion:reduce){.gfx-card{transition:none;}.gfx-card.anim{transition:none;}.gfx-hero{transition:none;}}
 
 /* 标题区：紧贴海报、浅色文字、箭头 + 计数 */
-.gfx-meta{display:flex;flex-direction:column;align-items:center;gap:2px;padding:2px 0 8px;text-align:center;}
+.gfx-meta{display:flex;flex-direction:column;align-items:center;gap:2px;padding:4px 0 12px;text-align:center;}
 .gfx-title{font-size:18px;font-weight:700;color:var(--text);letter-spacing:.5px;padding:0 24px;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .gfx-subrow{display:flex;align-items:center;gap:10px;margin-top:2px;color:var(--muted);font-size:12.5px;}
 .gfx-added{color:var(--primary-deep);font-weight:600;background:var(--green);padding:1px 8px;border-radius:999px;}

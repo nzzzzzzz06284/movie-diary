@@ -3,7 +3,7 @@ window.App = window.App || {};
 App.db = (function () {
   let _db = null;
   const DB_NAME = 'movie-diary';
-  const DB_VER = 1;
+  const DB_VER = 2;
 
   function open() {
     if (_db) return Promise.resolve(_db);
@@ -24,6 +24,9 @@ App.db = (function () {
         }
         if (!db.objectStoreNames.contains('settings')) {
           db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('audio')) {
+          db.createObjectStore('audio', { keyPath: 'id' });
         }
       };
       req.onsuccess = (e) => { _db = e.target.result; resolve(_db); };
@@ -84,12 +87,14 @@ App.db = (function () {
   }
   function saveRecord(rec) {
     rec.updatedAt = Date.now();
-    return tx('records', 'readwrite').then(os => reqP(os.put(rec))).then(() => rec);
+    return tx('records', 'readwrite').then(os => reqP(os.put(rec)))
+      .then(() => { if (App.sync && App.sync.push) App.sync.push(); return rec; });
   }
   function deleteRecord(id) {
     return tx('records', 'readwrite').then(os => reqP(os.delete(id)))
       .then(() => getScreenshots(id))
-      .then(shots => Promise.all(shots.map(s => deleteScreenshot(s.id))));
+      .then(shots => Promise.all(shots.map(s => deleteScreenshot(s.id))))
+      .then(() => { if (App.sync && App.sync.push) App.sync.push(); });
   }
 
   // ---- screenshots ----
@@ -101,10 +106,12 @@ App.db = (function () {
       .then(list => (list || []).sort((a, b) => (a.order || 0) - (b.order || 0)));
   }
   function saveScreenshot(shot) {
-    return tx('screenshots', 'readwrite').then(os => reqP(os.put(shot))).then(() => shot);
+    return tx('screenshots', 'readwrite').then(os => reqP(os.put(shot)))
+      .then(() => { if (App.sync && App.sync.push) App.sync.push(); return shot; });
   }
   function deleteScreenshot(id) {
-    return tx('screenshots', 'readwrite').then(os => reqP(os.delete(id)));
+    return tx('screenshots', 'readwrite').then(os => reqP(os.delete(id)))
+      .then(() => { if (App.sync && App.sync.push) App.sync.push(); });
   }
 
   // ---- settings ----
@@ -116,8 +123,25 @@ App.db = (function () {
     obj.key = 'app';
     return tx('settings', 'readwrite').then(os => reqP(os.put(obj)));
   }
+  // 通用键值存储（用于个人资料等，key 任意）
+  function getKV(key) {
+    return tx('settings', 'readonly').then(os => reqP(os.get(key)));
+  }
+  function setKV(key, obj) {
+    obj.key = key;
+    return tx('settings', 'readwrite').then(os => reqP(os.put(obj)));
+  }
+
+  // ---- audio（用户上传的音乐）----
+  function getTracks() {
+    return tx('audio', 'readonly').then(os => reqP(os.getAll()))
+      .then(list => (list || []).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)));
+  }
+  function saveTrack(t) { return tx('audio', 'readwrite').then(os => reqP(os.put(t))).then(() => t); }
+  function deleteTrack(id) { return tx('audio', 'readwrite').then(os => reqP(os.delete(id))); }
 
   return { open, getRecords, getRecord, saveRecord, deleteRecord,
            getAllScreenshots, getScreenshots, saveScreenshot, deleteScreenshot,
-           getSettings, saveSettings };
+           getSettings, saveSettings, getKV, setKV,
+           getTracks, saveTrack, deleteTrack };
 })();

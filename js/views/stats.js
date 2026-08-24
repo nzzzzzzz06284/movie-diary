@@ -60,9 +60,12 @@ App.views.stats = (function () {
     const rated = allEntries.filter(e => e.rating > 0);
     const avg = rated.length ? (rated.reduce((s, e) => s + e.rating, 0) / rated.length).toFixed(1) : '—';
 
-    // 观影偏好：标签计数
+    // 观影偏好：优先用类型(genres)，没有类型才用标签
     const tagCount = {};
-    records.forEach(r => (r.tags || []).forEach(t => tagCount[t] = (tagCount[t] || 0) + 1));
+    records.forEach(r => {
+      const cats = (r.genres && r.genres.length) ? r.genres : (r.tags || []);
+      cats.forEach(t => tagCount[t] = (tagCount[t] || 0) + 1);
+    });
     const prefData = Object.entries(tagCount).map(([label, value]) => ({ label, value })).sort((a, b) => b.value - a.value).slice(0, 10);
 
     // 按月趋势（今年，按每次观影事件统计）

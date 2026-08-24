@@ -1,0 +1,605 @@
+// 视图：电影库（发现页）—— TMDB 全量片库网格 + 搜索 + 多选批量加入我的电影库
+window.App = window.App || {};
+App.views = App.views || {};
+
+App.views.discover = (function () {
+  let state = { kind: 'popular', genre: null, lang: null, year: null, page: 1, totalPages: 1, query: '', loading: false,
+                selecting: false, selected: new Set(), movies: [], records: [], key: '' };
+  let scrollBound = false; // 滚动自动加载只绑定一次
+  let genreCache = null;   // TMDB 类型列表缓存
+
+  function posterBlock(poster) {
+    if (poster) return `<div class="poster"><img loading="lazy" decoding="async" src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
+    return `<div class="poster ph">🎬</div>`;
+  }
+  function debounce(fn, ms) {
+    let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
+  }
+  function inLibrary(m) {
+    return state.records.some(r => (m.tmdbId && r.tmdbId === m.tmdbId)
+      || (r.title || '').toLowerCase() === (m.title || '').toLowerCase());
+  }
+  function makeRecord(seed, opts) {
+    const date = opts.date, unknown = opts.unknown;
+    return {
+      id: App.util.uid(),
+      watchDates: date ? [date] : [],
+      title: seed.title || '未命名',
+      posterUrl: seed.poster || '',
+      overview: seed.overview || '',
+      director: '', cast: [], rating: opts.rating || 0,
+      review: '', comment: '', tags: [], quotes: [],
+      tmdbId: seed.tmdbId || '', year: seed.year || '',
+      genres: seed.genres || [], castInfo: [],
+      entries: [{ seq: 1, watchDate: date, rating: opts.rating || 0, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? opts.note : '' }],
+      createdAt: Date.now(), updatedAt: Date.now()
+    };
+  }
+
+  function renderGrid() {
+    const box = document.getElementById('discGrid');
+    if (!box) return;
+    if (!state.movies.length) {
+      box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query ? '没有匹配的电影' : '暂无电影，去「设置」填 TMDB 密钥'}</div>`;
+      return;
+    }
+    box.innerHTML = state.movies.map(m => {
+      const id = String(m.tmdbId);
+      const added = inLibrary(m);
+      const sel = state.selecting && state.selected.has(id);
+      return `
+      <div class="movie-card disc ${state.selecting ? 'selectable' : ''} ${sel ? 'sel' : ''} ${added ? 'added' : ''}" data-id="${id}" data-title="${App.util.escapeHtml(m.title)}" data-year="${m.year}" data-poster="${App.util.escapeHtml(m.poster)}" data-over="${App.util.escapeHtml(m.overview)}" data-tmdb="${m.tmdbId}" data-genres="${(m.genres || []).join(',')}">
+        ${posterBlock(m.poster)}
+        ${added ? '<span class="added-badge">已加入</span>' : ''}
+        <div class="body"><p class="name">${App.util.escapeHtml(m.title)}</p><div class="meta"><span>${m.year || ''}</span></div></div>
+        ${state.selecting ? `<span class="check ${sel ? 'on' : ''}"></span>` : ''}
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.movie-card.disc').forEach(c => c.onclick = () => {
+      const m = { tmdbId: c.dataset.tmdb, title: c.dataset.title, year: c.dataset.year, poster: c.dataset.poster, overview: c.dataset.over };
+      if (state.selecting) {
+        const id = c.dataset.id;
+        if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
+        c.classList.toggle('sel');
+        const ck = c.querySelector('.check'); if (ck) ck.classList.toggle('on');
+        updateBatch();
+      } else {
+        openMovie(m);
+      }
+    });
+  }
+
+  function updateBatch() {
+    const bar = document.getElementById('batchBar');
+    if (!bar) return;
+    document.getElementById('batchCount').textContent = state.selected.size;
+    bar.querySelector('#batchAdd').style.opacity = state.selected.size ? '1' : '.5';
+  }
+
+  function loadList(kind, page, append) {
+    if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
+    state.loading = true;
+    const req = App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page);
+    req.then(data => {
+      state.page = data.page; state.totalPages = data.totalPages;
+      state.movies = append ? state.movies.concat(data.results) : data.results;
+      state.loading = false;
+      if (!append) resetWall(); else if (wallCards.length) rekeyWall();
+      renderGrid();
+      const more = document.getElementById('discMore');
+      if (more) more.style.display = (state.page < state.totalPages) ? 'block' : 'none';
+    }).catch(() => { state.loading = false; renderMsg('加载失败（检查密钥或网络）'); });
+  }
+
+  function renderMsg(msg) {
+    const box = document.getElementById('discGrid');
+    if (box) box.innerHTML = `<div class="empty"><div class="big">🎬</div>${msg}</div>`;
+    const more = document.getElementById('discMore'); if (more) more.style.display = 'none';
+  }
+
+  function doSearch(q) {
+    if (!q) { loadList(state.kind, 1, false); return; }
+    if (!state.key) { renderMsg('需要 TMDB 密钥才能搜索'); return; }
+    App.tmdb.search(q, state.key).then(list => {
+      if (!list.length) renderMsg('没找到相关电影');
+      else {
+        state.movies = list;
+        resetWall();
+        renderGrid();
+        const more = document.getElementById('discMore'); if (more) more.style.display = 'none';
+      }
+    }).catch(() => renderMsg('搜索暂时不可用（网络/CORS 限制）'));
+  }
+
+  // 单个加入：弹窗填日期/评分，可 enrich 资料
+  function quickAdd(seed) {
+    seed = seed || {};
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.innerHTML = `
+      <div class="modal">
+        <h3>加入我的电影库</h3>
+        <div class="preview">
+          ${seed.poster ? `<img src="${seed.poster}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">🎬</div>`}
+          <div><div style="font-weight:600">${App.util.escapeHtml(seed.title || '')}</div><div class="muted">${seed.year || ''}</div></div>
+        </div>
+        <div class="field"><label>观影时间（首刷，可留空稍后补）</label><input type="date" id="qaDate" value=""></div>
+        <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 🤔 记不清具体哪天了</label>
+        <div class="field" id="qaNoteWrap" style="display:none;margin-top:8px"><label>大概什么时候？（选填）</label><input type="text" id="qaNote" placeholder="如 2020 / 大学时"></div>
+        <div class="field"><label>快速评分（可留空，进详情再评）</label><div class="stars" id="qaStars"></div></div>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="btn block" id="qaCancel">取消</button>
+          <button class="btn primary block" id="qaOk">加入</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+    let rating = 0;
+    const starsBox = mask.querySelector('#qaStars');
+    function paintStars() { starsBox.innerHTML = [1,2,3,4,5].map(i => `<span class="s ${i <= rating ? 'on' : ''}" data-i="${i}">★</span>`).join(''); starsBox.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paintStars(); }); }
+    paintStars();
+    const qaUnk = mask.querySelector('#qaUnknown'), qaNoteWrap = mask.querySelector('#qaNoteWrap'), qaDate = mask.querySelector('#qaDate');
+    qaUnk.onchange = () => { qaDate.disabled = qaUnk.checked; qaNoteWrap.style.display = qaUnk.checked ? 'block' : 'none'; if (qaUnk.checked) qaDate.value = ''; };
+    mask.querySelector('#qaCancel').onclick = () => mask.remove();
+    mask.querySelector('#qaOk').onclick = () => {
+      const unknown = qaUnk.checked, note = mask.querySelector('#qaNote').value.trim();
+      const date = unknown ? '' : (qaDate.value || '');
+      const rec = makeRecord(seed, { date, unknown, note, rating: rating || 0 });
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入我的电影库 🎉'); App.audio.sfx('success'); reload().then(renderGrid); });
+      if (seed.tmdbId && state.key) App.tmdb.details(seed.tmdbId, state.key).then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || []; finish(rec); }).catch(() => finish(rec));
+      else finish(rec);
+    };
+    mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
+  }
+
+  // 批量加入：多选的电影一次性建记录（仅基础字段，后续在「我的电影库」补心得）
+  function batchAdd() {
+    const picks = state.movies.filter(m => state.selected.has(String(m.tmdbId)) && !inLibrary(m));
+    if (!picks.length) { App.util.toast('没有可加入的新电影'); return; }
+    let i = 0, ok = 0;
+    App.util.toast('正在加入 ' + picks.length + ' 部…');
+    function next() {
+      if (i >= picks.length) {
+        state.selecting = false; state.selected.clear();
+        exitSelect();
+        App.util.toast('已加入 ' + ok + ' 部，去「我的电影库」补心得 🎉');
+        App.audio.sfx('success');
+        reload().then(renderGrid);
+        return;
+      }
+      const m = picks[i++];
+      const rec = makeRecord(m, { date: '', unknown: false, note: '', rating: 0 });
+      const finish = (r) => App.db.saveRecord(r).then(() => { ok++; next(); });
+      if (m.tmdbId && state.key) App.tmdb.details(m.tmdbId, state.key).then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || m.year; rec.genres = d.genres || []; finish(rec); }).catch(() => finish(rec));
+      else finish(rec);
+    }
+    next();
+  }
+
+  function enterSelect() {
+    state.selecting = true; state.selected.clear();
+    const mb = document.getElementById('discMulti'); if (mb) mb.textContent = '完成';
+    const bar = document.getElementById('batchBar'); if (bar) bar.hidden = false;
+    const fab = document.getElementById('fab'); if (fab) fab.style.display = 'none';
+    const wrap = document.getElementById('gfxHero'); if (wrap) wrap.style.display = 'none';
+    updateBatch();
+    renderGrid();
+  }
+  function exitSelect() {
+    state.selecting = false;
+    const mb = document.getElementById('discMulti'); if (mb) mb.textContent = '多选';
+    const bar = document.getElementById('batchBar'); if (bar) bar.hidden = true;
+    const fab = document.getElementById('fab'); if (fab) fab.style.display = 'flex';
+    const wrap = document.getElementById('gfxHero'); if (wrap) wrap.style.display = '';
+    renderGrid();
+  }
+
+  // 地区（按原声语言近似）与年份选项
+  const LANGS = [['zh', '中国'], ['en', '美国'], ['ja', '日本'], ['ko', '韩国'], ['fr', '法国'], ['hi', '印度'], ['th', '泰国']];
+
+  function filterChip(active, key, val, label) {
+    return `<span class="chip ${active ? 'active' : ''}" data-${key}="${val}">${label}</span>`;
+  }
+
+  function paintFilters(root) {
+    // 类型栏：全部 + TMDB 类型（缓存列表避免每次点击都请求）
+    if (state.key) {
+      const getGenres = genreCache ? Promise.resolve(genreCache) : App.tmdb.genres(state.key).then(gs => { genreCache = gs; return gs; });
+      getGenres.then(gs => {
+        const bar = root.querySelector('#discGenres'); if (!bar) return;
+        bar.innerHTML = `<span class="f-label">类型</span>` + filterChip(!state.genre, 'g', '', '全部')
+          + gs.slice(0, 18).map(g => filterChip(String(state.genre) === String(g.id), 'g', g.id, App.util.escapeHtml(g.name))).join('');
+        bar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+          const v = c.dataset.g;
+          state.genre = v ? ((String(state.genre) === v) ? null : v) : null;
+          resetFiltersAndLoad(root); paintFilters(root);
+        });
+      }).catch(() => {});
+    }
+    // 地区栏
+    const lbar = root.querySelector('#discLangs');
+    if (lbar) {
+      lbar.innerHTML = `<span class="f-label">地区</span>` + filterChip(!state.lang, 'l', '', '全部')
+        + LANGS.map(([v, n]) => filterChip(state.lang === v, 'l', v, n)).join('');
+      lbar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+        const v = c.dataset.l;
+        state.lang = v ? (state.lang === v ? null : v) : null;
+        resetFiltersAndLoad(root); paintFilters(root);
+      });
+    }
+    // 年份栏：近 5 年 + 更早
+    const ybar = root.querySelector('#discYears');
+    if (ybar) {
+      const y = new Date().getFullYear();
+      const yrs = [y, y - 1, y - 2, y - 3, y - 4];
+      ybar.innerHTML = `<span class="f-label">年份</span>` + filterChip(!state.year, 'y', '', '全部')
+        + yrs.map(yy => filterChip(String(state.year) === String(yy), 'y', yy, String(yy))).join('')
+        + filterChip(state.year === 'old', 'y', 'old', '更早');
+      ybar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+        const v = c.dataset.y;
+        state.year = v ? (state.year === v ? null : v) : null;
+        resetFiltersAndLoad(root); paintFilters(root);
+      });
+    }
+  }
+
+  function resetFiltersAndLoad(root) {
+    state.query = '';
+    const inp = root.querySelector('#discSearch'); if (inp) inp.value = '';
+    const clr = root.querySelector('#discClear'); if (clr) clr.style.display = 'none';
+    loadList(state.kind, 1, false);
+  }
+
+  // ===== 旋转海报墙 v2（环形容器 + transform 滑动，零 DOM 重建、无限循环、可拖拽） =====
+  const WALL_STEP = 84, WALL_N = 7, WALL_MID = 3;
+  let wallIdx = 0, wallTimer = null, wallCards = [], wallRing = null, wallBusy = false;
+  let wallDrag = { on: false, x0: 0, dx: 0, t0: 0, moved: false };
+  let wallTimer2 = null, wallCollapsed = false, heroEl = null, wallSuppressClick = false;
+  let collapseBound = false, ticking = false;
+
+  const wMod = (i, n) => ((i % n) + n) % n;
+
+  function cardT(slot) {
+    const d = Math.abs(slot);
+    return `translateX(${slot * WALL_STEP}px) rotateY(${-slot * 24}deg) scale(${(1 - d * 0.13).toFixed(3)})`;
+  }
+  function applyVisual(card, slot) {
+    const d = Math.abs(slot);
+    card.style.transform = cardT(slot);
+    card.style.opacity = (1 - d * 0.22).toFixed(2);
+    card.style.zIndex = slot === 0 ? 20 : 20 - d * 6;
+  }
+  // 预渲染固定 7 张卡片（环），之后只换内容 + 平移 transform
+  function ensureRing(root) {
+    const wall = root.querySelector('#gfxWall');
+    if (!wall) return null;
+    if (wall._ready) return wall;
+    wall._ready = true;
+    wall.innerHTML = '';
+    wallCards = [];
+    for (let k = 0; k < WALL_N; k++) {
+      const c = document.createElement('div');
+      c.className = 'gfx-card';
+      c.innerHTML = '<img alt=""><div class="gfx-ph" hidden>🎬</div><span class="added-badge" hidden>已加入</span>';
+      applyVisual(c, k - WALL_MID);
+      wall.appendChild(c);
+      wallCards.push(c);
+    }
+    wallRing = wall;
+    return wall;
+  }
+
+  function setCard(card, m, slot) {
+    const img = card.querySelector('img');
+    const ph = card.querySelector('.gfx-ph');
+    const badge = card.querySelector('.added-badge');
+    card.dataset.tmdb = m.tmdbId;
+    card.classList.toggle('cur', slot === 0);
+    if (m.poster) {
+      img.src = m.poster;
+      img.hidden = false;
+      ph.hidden = true;
+      img.onerror = () => { img.hidden = true; ph.hidden = false; };
+    } else {
+      img.hidden = true;
+      ph.hidden = false;
+    }
+    badge.hidden = !inLibrary(m);
+  }
+
+  // 重排环：把内容对齐到当前 wallIdx（静止态），只更新 7 张卡内容 + 标题
+  function rekeyWall() {
+    const n = state.movies.length;
+    if (!n) { if (wallCards) wallCards.forEach(c => c.style.display = 'none'); updateMeta(null); return; }
+    wallIdx = wMod(wallIdx, n);
+    wallCards.forEach((c, k) => c.style.display = '');
+    wallCards.forEach((card, k) => {
+      const slot = k - WALL_MID;
+      const m = state.movies[wMod(wallIdx + slot, n)];
+      setCard(card, m, slot);
+      applyVisual(card, slot);
+    });
+    updateMeta(state.movies[wallIdx]);
+    // 预加载相邻海报，切换零白屏
+    [1, -1, 2, -2].forEach(off => {
+      const im = new Image();
+      const p = state.movies[wMod(wallIdx + off, n)].poster;
+      if (p) im.src = p;
+    });
+  }
+
+  function updateMeta(m) {
+    const box = document.getElementById('gfxMeta');
+    if (!box) return;
+    if (!m) { box.innerHTML = ''; return; }
+    const t = box.querySelector('#gfxTitle');
+    if (t) t.textContent = m.title;
+    const y = box.querySelector('#gfxYear');
+    if (y) y.textContent = m.year || '';
+    const a = box.querySelector('#gfxAdded');
+    if (a) a.style.display = inLibrary(m) ? '' : 'none';
+    const c = box.querySelector('#gfxCount');
+    if (c && state.movies.length) c.textContent = (wMod(wallIdx, state.movies.length) + 1) + '/' + state.movies.length;
+  }
+
+  function clearSettle() { if (wallTimer2) { clearTimeout(wallTimer2); wallTimer2 = null; } }
+
+  function openMovie(m) {
+    if (!m) return;
+    if (inLibrary(m)) {
+      const rec = state.records.find(r => String(r.tmdbId) === String(m.tmdbId));
+      if (rec) { App.audio && App.audio.sfx('click'); App.router.go('#/detail/' + rec.id); return; }
+    }
+    quickAdd(m);
+  }
+
+  // 翻一页：卡片整体平移一步（CSS transition），结束后回收重排（不可见跳变）
+  function stepWall(dir) {
+    const n = state.movies.length;
+    if (!n || wallBusy || wallCollapsed || wallDrag.on) return;
+    wallBusy = true;
+    wallIdx += dir;
+    wallRing.classList.add('anim');
+    wallCards.forEach((card, k) => applyVisual(card, k - WALL_MID - dir));
+    clearSettle();
+    wallTimer2 = setTimeout(() => {
+      wallBusy = false;
+      wallRing.classList.remove('anim');
+      rekeyWall();
+    }, 480);
+  }
+
+  function jumpTo(idx) {
+    const n = state.movies.length;
+    if (!n || wallBusy) return;
+    wallIdx = wMod(idx, n);
+    wallRing.classList.remove('anim');
+    rekeyWall();
+  }
+
+  function resetWall() {
+    wallIdx = 0;
+    if (wallRing) { wallRing.classList.remove('anim'); }
+    if (wallCards.length) rekeyWall();
+  }
+
+  function stopWallAuto() { if (wallTimer) { clearInterval(wallTimer); wallTimer = null; } clearSettle(); }
+
+  function startWallAuto() {
+    stopWallAuto();
+    const rm = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (rm && rm.matches) return; // 减弱动效：只手动
+    wallTimer = setInterval(() => {
+      if (!document.getElementById('gfxWall')) { stopWallAuto(); return; }
+      if (wallCollapsed || wallBusy || wallDrag.on) return;
+      stepWall(1);
+    }, 3500);
+  }
+
+  // 丝滑拖拽：触摸 + 鼠标都支持，跟手（无过渡 transform），松手按位移/速度翻页
+  function bindWallDrag(root) {
+    const wall = root.querySelector('#gfxWall');
+    if (!wall || wall._dragBound) return;
+    wall._dragBound = true;
+    function start(x) {
+      if (!wallCards.length) return;
+      stopWallAuto(); clearSettle(); wallBusy = false;
+      wallDrag.on = true; wallDrag.x0 = x; wallDrag.dx = 0; wallDrag.t0 = Date.now(); wallDrag.moved = false;
+      wallRing.classList.add('dragging');
+    }
+    function move(x) {
+      if (!wallDrag.on) return;
+      wallDrag.dx = x - wallDrag.x0;
+      if (!wallDrag.moved && Math.abs(wallDrag.dx) > 5) wallDrag.moved = true;
+      wallRing.style.transform = 'translateX(' + wallDrag.dx + 'px)';
+    }
+    function end() {
+      if (!wallDrag.on) return;
+      wallDrag.on = false;
+      wallRing.classList.remove('dragging');
+      if (wallDrag.moved) wallSuppressClick = true; // 拖完本次点击不触发打开
+      wallDrag.moved = false;
+      const dt = Math.max(1, Date.now() - wallDrag.t0);
+      const spd = Math.abs(wallDrag.dx) / dt;
+      let dir = 0;
+      if (wallDrag.dx > 55 || (wallDrag.moved && spd > 0.5 && wallDrag.dx > 0)) dir = -1;
+      else if (wallDrag.dx < -55 || (wallDrag.moved && spd > 0.5 && wallDrag.dx < 0)) dir = 1;
+      if (dir) {
+        wallIdx += dir;
+        wallRing.style.transition = 'transform .3s ease';
+        wallRing.style.transform = 'translateX(0)';
+        wallRing.classList.add('anim');
+        wallCards.forEach((card, k) => applyVisual(card, k - WALL_MID - dir));
+        clearSettle();
+        wallTimer2 = setTimeout(() => {
+          wallBusy = false;
+          wallRing.style.transition = '';
+          wallRing.classList.remove('anim');
+          rekeyWall();
+        }, 480);
+      } else {
+        wallRing.style.transition = 'transform .3s ease';
+        wallRing.style.transform = 'translateX(0)';
+        setTimeout(() => { wallRing.style.transition = ''; }, 320);
+      }
+      setTimeout(startWallAuto, 700);
+    }
+    wall.addEventListener('touchstart', e => { if (e.touches[0]) start(e.touches[0].clientX); }, { passive: true });
+    wall.addEventListener('touchmove', e => { if (wallDrag.on && e.touches[0]) move(e.touches[0].clientX); }, { passive: true });
+    wall.addEventListener('touchend', end, { passive: true });
+    wall.addEventListener('touchcancel', end, { passive: true });
+    wall.addEventListener('mousedown', e => { if (e.button === 0) { e.preventDefault(); start(e.clientX); } });
+    window.addEventListener('mousemove', e => { if (wallDrag.on) move(e.clientX); }, { passive: true });
+    window.addEventListener('mouseup', () => { if (wallDrag.on) end(); });
+    // 点击：中间海报=打开；两侧海报=跳转
+    wall.addEventListener('click', e => {
+      if (wallSuppressClick) { wallSuppressClick = false; return; }
+      if (wallDrag.moved) return;
+      const card = e.target.closest('.gfx-card');
+      if (!card || !state.movies.length) return;
+      const m = state.movies.find(x => String(x.tmdbId) === card.dataset.tmdb);
+      if (!m) return;
+      const idx = state.movies.indexOf(m);
+      if (idx === wMod(wallIdx, state.movies.length)) { openMovie(m); return; }
+      jumpTo(idx);
+    });
+  }
+
+  // ===== 可折叠海报墙：下滑>50px 收起，回到顶部再下拉(>60px)展开 =====
+  function expandWall() {
+    if (!wallCollapsed) return;
+    wallCollapsed = false;
+    if (heroEl) heroEl.classList.remove('wall-collapsed');
+    startWallAuto();
+  }
+
+  function bindCollapse(root) {
+    heroEl = root.querySelector('#gfxHero');
+    if (!heroEl || collapseBound) return;
+    collapseBound = true;
+    const onScroll = () => {
+      if (window.scrollY > 50 && !wallCollapsed) {
+        wallCollapsed = true;
+        heroEl.classList.add('wall-collapsed');
+        stopWallAuto();
+      }
+    };
+    const rafScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => { ticking = false; onScroll(); });
+    };
+    window.addEventListener('scroll', rafScroll, { passive: true });
+    // 顶部下拉展开（触摸：竖直意图且 scrollY==0）
+    let tY0 = null;
+    window.addEventListener('touchstart', e => { if (window.scrollY === 0) tY0 = e.touches[0].clientY; }, { passive: true });
+    window.addEventListener('touchmove', e => {
+      if (wallCollapsed && window.scrollY === 0 && tY0 != null && e.touches[0]) {
+        const dy = e.touches[0].clientY - tY0;
+        if (dy > 60) expandWall();
+      }
+    }, { passive: true });
+    window.addEventListener('touchend', () => { tY0 = null; }, { passive: true });
+    // 鼠标滚轮向上
+    window.addEventListener('wheel', e => {
+      if (wallCollapsed && window.scrollY === 0 && e.deltaY < -60) expandWall();
+    }, { passive: true });
+  }
+
+  function render(param, root) {
+    const kindName = { popular: '热门', now_playing: '最新', top_rated: '高分' };
+    root.innerHTML = `
+      <div class="view-block search-wrap">
+        <div class="search-bar">
+          <span class="ico">🔍</span>
+          <input id="discSearch" type="text" placeholder="搜电影名…">
+          <span class="search-clear" id="discClear" style="display:none">✕</span>
+        </div>
+      </div>
+      <div class="gfx-hero" id="gfxHero">
+        <div class="gfx-wall-wrap" id="gfxWallWrap"><div class="gfx-wall" id="gfxWall"></div></div>
+        <div class="gfx-meta" id="gfxMeta">
+          <div class="gfx-title" id="gfxTitle"></div>
+          <div class="gfx-subrow">
+            <button class="gfx-arr" id="gfxPrev" title="上一部">‹</button>
+            <span id="gfxYear"></span>
+            <span class="gfx-added" id="gfxAdded" style="display:none">已加入 ✓</span>
+            <span id="gfxCount"></span>
+            <button class="gfx-arr" id="gfxNext" title="下一部">›</button>
+          </div>
+        </div>
+      </div>
+      <div class="view-block">
+        <div class="seg">
+          <button class="seg-btn ${state.kind === 'popular' ? 'active' : ''}" data-kind="popular">热门</button>
+          <button class="seg-btn ${state.kind === 'now_playing' ? 'active' : ''}" data-kind="now_playing">最新</button>
+          <button class="seg-btn ${state.kind === 'top_rated' ? 'active' : ''}" data-kind="top_rated">高分</button>
+        </div>
+        <div class="genre-bar" id="discGenres"></div>
+        <div class="genre-bar" id="discLangs"></div>
+        <div class="genre-bar" id="discYears"></div>
+      </div>
+      <div class="view-block" style="display:flex;align-items:center;justify-content:space-between;margin:2px 0 8px">
+        <div class="section-title" style="margin:0">电影库 <span class="hint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
+        <button class="btn sm" id="discMulti">多选</button>
+      </div>
+      <div id="discGrid" class="movie-grid discover"></div>
+      <div id="batchBar" class="batch-bar" hidden>
+        <button class="btn sm" id="batchCancel">取消</button>
+        <span class="batch-count">已选 <b id="batchCount">0</b> 部</span>
+        <button class="btn primary" id="batchAdd">添加</button>
+      </div>`;
+
+    root.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
+      state.kind = b.dataset.kind;
+      root.querySelectorAll('.seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      state.query = '';
+      loadList(state.kind, 1, false);
+    });
+    const input = root.querySelector('#discSearch');
+    input.oninput = debounce((e) => {
+      state.query = e.target.value.trim();
+      root.querySelector('#discClear').style.display = state.query ? 'block' : 'none';
+      doSearch(state.query);
+    }, 400);
+    root.querySelector('#discClear').onclick = () => { input.value = ''; state.query = ''; root.querySelector('#discClear').style.display = 'none'; loadList(state.kind, 1, false); };
+    root.querySelector('#discMulti').onclick = () => { if (state.selecting) exitSelect(); else enterSelect(); };
+    root.querySelector('#batchCancel').onclick = () => exitSelect();
+    root.querySelector('#batchAdd').onclick = () => batchAdd();
+    // 筛选栏：类型（含「全部」）/ 地区 / 年份
+    paintFilters(root);
+    // 海报墙：预渲染环 + 拖拽 + 可折叠 + 自动轮播
+    ensureRing(root);
+    bindWallDrag(root);
+    bindCollapse(root);
+    root.querySelector('#gfxPrev').onclick = () => { if (!wallBusy) stepWall(-1); };
+    root.querySelector('#gfxNext').onclick = () => { if (!wallBusy) stepWall(1); };
+    startWallAuto();
+    // 本页为浅色沉浸（覆盖路由设置的深色状态栏色）
+    const tc = document.querySelector('meta[name="theme-color"]');
+    if (tc) tc.setAttribute('content', '#f5fbf9');
+
+    // 滚动到底自动加载更多（在 render 里绑定一次，避免 init 未调用导致不触发）
+    if (!scrollBound) {
+      scrollBound = true;
+      window.addEventListener('scroll', () => {
+        if (state.loading || state.query) return;
+        const doc = document.documentElement;
+        if (window.innerHeight + window.scrollY >= (doc.scrollHeight || document.body.scrollHeight) - 150) {
+          if (state.page < state.totalPages) loadList(state.kind, state.page + 1, true);
+        }
+      });
+    }
+
+    loadList(state.kind, 1, false);
+  }
+
+  function init() {
+    return App.db.getSettings().then(s => { state.key = s.tmdbApiKey || ''; })
+      .then(() => App.db.getRecords()).then(r => { state.records = r; });
+  }
+  function reload() {
+    return App.db.getRecords().then(r => { state.records = r; })
+      .then(() => App.db.getSettings()).then(s => { state.key = s.tmdbApiKey || ''; });
+  }
+  return { render, init, reload };
+})();

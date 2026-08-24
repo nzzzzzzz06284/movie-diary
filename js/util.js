@@ -21,13 +21,10 @@ App.util = (function () {
   }
   function starsHtml(rating, scale) {
     scale = scale || 5;
-    const max = scale === 10 ? 5 : 5;
-    // 10分制按每2分一星显示；5分制一星一分
-    const full = scale === 10 ? Math.round((rating || 0) / 2) : Math.round(rating || 0);
-    let h = '<span class="rate">';
-    for (let i = 1; i <= 5; i++) h += i <= full ? '★' : '☆';
-    h += `</span>`;
-    return h;
+    // 5分制一星一分；10分制每2分一星；支持小数（4.5 → 亮4星半）
+    const v = scale === 10 ? (rating || 0) / 2 : (rating || 0);
+    const pct = Math.max(0, Math.min(5, v)) / 5 * 100;
+    return `<span class="rate" style="--r:${pct.toFixed(1)}%"><span class="rb">★★★★★</span><span class="rf">★★★★★</span></span>`;
   }
 
   let toastTimer = null;
@@ -154,7 +151,21 @@ App.util = (function () {
     const a = watchDates(rec);
     return a.slice().sort()[0] || '';
   }
-  function watchCount(rec) { return watchDates(rec).length; }
+  function watchCount(rec) { return entries(rec).length; }
+
+  // 单次观看的日期展示：记不清时显示备注或「记不清了」
+  function fmtEntryDate(e) {
+    if (!e) return '';
+    if (e.dateUnknown) return (e.dateNote && String(e.dateNote).trim()) ? String(e.dateNote).trim() : '记不清了';
+    return fmtDate(e.watchDate);
+  }
+  // 电影卡片上的日期：优先显示最近一次已知日期，否则若含「记不清」观看则显示「记不清了」
+  function movieDateLabel(rec) {
+    const lw = latestWatch(rec);
+    if (lw) return fmtDate(lw);
+    if (entries(rec).some(e => e.dateUnknown)) return '记不清了';
+    return '';
+  }
 
   // 按次观影 entries 的辅助函数
   function entries(rec) { return (rec && Array.isArray(rec.entries)) ? rec.entries : []; }
@@ -169,9 +180,24 @@ App.util = (function () {
     const map = { 1: '首刷', 2: '二刷', 3: '三刷', 4: '四刷', 5: '五刷', 6: '六刷', 7: '七刷', 8: '八刷', 9: '九刷' };
     return map[seq] || (seq + '刷');
   }
+  // 评论区：兼容旧 comment 单条字符串，统一返回数组（支持多条评论）
+  function eComments(e) {
+    if (!e) return [];
+    if (Array.isArray(e.comments)) return e.comments;
+    if (e.comment && String(e.comment).trim()) return [{ text: e.comment, ts: Date.now() }];
+    return [];
+  }
+  function eReason(e) { return (e && e.ratingReason) || ''; }
+  function fmtTime(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
 
   return { uid, today, fmtDate, escapeHtml, starsHtml, toast,
            compressImage, blobToDataURL, dataURLToBlob, exportAll, importAll,
            watchDates, latestWatch, firstWatch, watchCount,
-           entries, entryBySeq, latestEntry, latestRating, entryLabel };
+           entries, entryBySeq, latestEntry, latestRating, entryLabel,
+           fmtEntryDate, movieDateLabel, eComments, eReason, fmtTime };
 })();
