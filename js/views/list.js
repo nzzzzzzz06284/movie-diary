@@ -3,7 +3,7 @@ window.App = window.App || {};
 App.views = App.views || {};
 
 App.views.list = (function () {
-  let state = { query: '', tags: new Set(), year: '' };
+  let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set() };
   let records = [];
   let key = '';
 
@@ -34,16 +34,32 @@ App.views.list = (function () {
       box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query || state.tags.size || state.year ? '没有匹配的电影' : '还没有电影，去搜索或点右下角 ＋ 添加'}</div>`;
       return;
     }
-    box.innerHTML = `<div class="movie-grid">` + list.map(r => `
-      <div class="movie-card" data-id="${r.id}">
+    const sel = state.selSet;
+    box.innerHTML = `<div class="movie-grid ${state.selecting ? 'selecting' : ''}">` + list.map(r => {
+      const isSel = sel.has(r.id);
+      return `
+      <div class="movie-card ${state.selecting ? 'selectable' : ''} ${isSel ? 'sel' : ''}" data-id="${r.id}">
+        ${state.selecting ? '<span class="check ' + (isSel ? 'on' : '') + '"></span>' : ''}
         ${posterBlock(r.posterUrl)}
         <div class="body">
           <p class="name">${App.util.escapeHtml(r.title)}</p>
           <div class="meta"><span>${App.util.movieDateLabel(r)}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? App.util.starsHtml(App.util.latestRating(r), 5) : ''}</div>
         </div>
-      </div>`).join('') + `</div>`;
-    box.querySelectorAll('.movie-card').forEach(c =>
-      c.onclick = () => App.router.go('#/detail/' + c.dataset.id));
+      </div>`;
+    }).join('') + `</div>`;
+    box.querySelectorAll('.movie-card').forEach(c => {
+      if (state.selecting) {
+        c.onclick = () => {
+          const id = c.dataset.id;
+          if (state.selSet.has(id)) state.selSet.delete(id); else state.selSet.add(id);
+          c.classList.toggle('sel');
+          const ck = c.querySelector('.check'); if (ck) ck.classList.toggle('on');
+          updateListBatch();
+        };
+      } else {
+        c.onclick = () => App.router.go('#/detail/' + c.dataset.id);
+      }
+    });
   }
 
   function renderFilters() {
@@ -193,12 +209,104 @@ App.views.list = (function () {
   function render(param, root) {
     root.innerHTML = `
       <div class="view-block">
-        <div class="section-title">我的电影库 <span class="hint">${records.length} 部</span></div>
+        <div class="section-title">我的电影库 <span class="hint">${records.length} 部</span>
+          <span class="ml-auto" style="display:flex;gap:8px;margin-left:auto">
+            <button class="btn sm ghost" id="listDup">清除重复</button>
+            <button class="btn sm" id="listMulti">多选删除</button>
+          </span>
+        </div>
         <div id="filters"></div>
         <div id="library" style="margin-top:10px"></div>
+      </div>
+      <div id="listBatchBar" class="batch-bar" hidden>
+        <button class="btn sm" id="listCancel">取消</button>
+        <span class="batch-count">已选 <b id="listCount">0</b> 部</span>
+        <button class="btn danger" id="listDel">删除</button>
       </div>`;
     renderFilters();
     renderLibrary();
+    const multi = document.getElementById('listMulti');
+    if (multi) multi.onclick = () => { if (state.selecting) exitMulti(); else enterMulti(); };
+    const dup = document.getElementById('listDup');
+    if (dup) dup.onclick = clearDuplicates;
+    const cancel = document.getElementById('listCancel');
+    if (cancel) cancel.onclick = exitMulti;
+    const del = document.getElementById('listDel');
+    if (del) del.onclick = batchDelete;
+  }
+
+  function updateListBatch() {
+    const bar = document.getElementById('listBatchBar');
+    if (!bar) return;
+    const c = document.getElementById('listCount'); if (c) c.textContent = state.selSet.size;
+    const d = document.getElementById('listDel'); if (d) d.style.opacity = state.selSet.size ? '1' : '.5';
+  }
+  function enterMulti() {
+    state.selecting = true; state.selSet.clear();
+    const bar = document.getElementById('listBatchBar'); if (bar) bar.hidden = false;
+    const btn = document.getElementById('listMulti'); if (btn) btn.textContent = '完成';
+    updateListBatch(); renderLibrary();
+  }
+  function exitMulti() {
+    state.selecting = false; state.selSet.clear();
+    const bar = document.getElementById('listBatchBar'); if (bar) bar.hidden = true;
+    const btn = document.getElementById('listMulti'); if (btn) btn.textContent = '多选删除';
+    renderLibrary();
+  }
+  // 通用确认弹窗，返回 Promise<boolean>
+  function confirmModal(msg) {
+    return new Promise(resolve => {
+      const mask = document.createElement('div');
+      mask.className = 'modal-mask';
+      mask.innerHTML = `<div class="modal"><p style="margin:6px 0 16px;line-height:1.5">${msg}</p>
+        <div style="display:flex;gap:10px"><button class="btn block" id="cmNo">取消</button><button class="btn danger block" id="cmYes">删除</button></div></div>`;
+      document.body.appendChild(mask);
+      const close = (v) => { mask.remove(); resolve(v); };
+      mask.querySelector('#cmNo').onclick = () => close(false);
+      mask.querySelector('#cmYes').onclick = () => close(true);
+      mask.onclick = (e) => { if (e.target === mask) close(false); };
+    });
+  }
+  // 多选批量删除
+  function batchDelete() {
+    const ids = [...state.selSet];
+    if (!ids.length) return;
+    confirmModal(`确定删除选中的 ${ids.length} 部电影吗？此操作不可恢复。`).then(ok => {
+      if (!ok) return;
+      let i = 0; const total = ids.length;
+      (function del() {
+        if (i >= total) {
+          exitMulti();
+          reload().then(() => { renderFilters(); renderLibrary(); });
+          App.util.toast('已删除 ' + total + ' 部 🗑️');
+          App.audio.sfx('success');
+          return;
+        }
+        App.db.deleteRecord(ids[i++]).then(del);
+      })();
+    });
+  }
+  // 一键清除重复电影（同 TMDB 编号或同片名视为重复，保留第一部）
+  function clearDuplicates() {
+    const seen = new Set(); const dup = [];
+    records.forEach(r => {
+      const k = (r.tmdbId && r.tmdbId !== '') ? ('t' + r.tmdbId) : ('n' + (r.title || '').toLowerCase());
+      if (seen.has(k)) dup.push(r.id); else seen.add(k);
+    });
+    if (!dup.length) { App.util.toast('没有发现重复电影 🎉'); return; }
+    confirmModal(`发现 ${dup.length} 部重复电影，将保留第一部、删除其余重复项。确定清除？`).then(ok => {
+      if (!ok) return;
+      let i = 0; const total = dup.length;
+      (function del() {
+        if (i >= total) {
+          reload().then(() => { renderFilters(); renderLibrary(); });
+          App.util.toast('已清除 ' + total + ' 部重复 🎉');
+          App.audio.sfx('success');
+          return;
+        }
+        App.db.deleteRecord(dup[i++]).then(del);
+      })();
+    });
   }
 
   // 初始化时加载数据

@@ -11,6 +11,35 @@ window.App = window.App || {};
     setTimeout(() => { sp.classList.add('hide'); setTimeout(() => sp.remove(), 400); }, 900);
   }
 
+  // 注册 Service Worker，并在检测到新版本时自动刷新页面。
+  // 这样线上一更新，手机重开 app 就会静默变成新版，不用手动删图标重装。
+  function registerSWWithUpdate() {
+    if (!('serviceWorker' in navigator)) return;
+    let refreshing = false;
+    // 新 SW 激活接管页面时，刷新一次以加载新版资源（防死循环：只刷新一次）
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (refreshing) return;
+      refreshing = true;
+      window.location.reload();
+    });
+    navigator.serviceWorker.register('sw.js').then(reg => {
+      // 检测到新 SW 正在安装：sw.js 里已有 skipWaiting()，装完会立即激活，
+      // 进而触发上面的 controllerchange → 自动刷新。
+      reg.addEventListener('updatefound', () => {
+        const sw = reg.installing;
+        if (!sw) return;
+        sw.addEventListener('statechange', () => {
+          // 仅当「有旧版在控制页面」时才算更新（首次安装不刷新）
+          if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+            // 等待 skipWaiting 让新 SW 接管，无需手动处理
+          }
+        });
+      });
+      // 主动检查一次更新（应对「划掉重开但浏览器没去拉新 sw」的情况）
+      reg.update().catch(() => {});
+    }).catch(() => {});
+  }
+
   function boot() {
     hideSplash();
     App.db.open()
@@ -18,7 +47,7 @@ window.App = window.App || {};
       .then(() => {
         document.getElementById('fab').onclick = () => App.router.go('#/edit');
         if (location.protocol.startsWith('http')) {
-          navigator.serviceWorker && navigator.serviceWorker.register('sw.js').catch(() => {});
+          registerSWWithUpdate();
         } else {
           console.warn('当前以 file:// 打开，Service Worker 不可用；建议托管到 https 以获得最佳体验。');
         }

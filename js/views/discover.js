@@ -58,6 +58,7 @@ App.views.discover = (function () {
     box.querySelectorAll('.movie-card.disc').forEach(c => c.onclick = () => {
       const m = { tmdbId: c.dataset.tmdb, title: c.dataset.title, year: c.dataset.year, poster: c.dataset.poster, overview: c.dataset.over };
       if (state.selecting) {
+        if (c.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
         const id = c.dataset.id;
         if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
         c.classList.toggle('sel');
@@ -166,9 +167,9 @@ App.views.discover = (function () {
     App.util.toast('正在加入 ' + picks.length + ' 部…');
     function next() {
       if (i >= picks.length) {
-        state.selecting = false; state.selected.clear();
-        exitSelect();
-        App.util.toast('已加入 ' + ok + ' 部，去「我的电影库」补心得 🎉');
+        state.selected.clear();   // 清零已选计数，保持在多选模式继续选择
+        updateBatch();
+        App.util.toast('已加入 ' + ok + ' 部，继续选择或点「完成」退出 🎉');
         App.audio.sfx('success');
         reload().then(renderGrid);
         return;
