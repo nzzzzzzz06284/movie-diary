@@ -3,7 +3,7 @@
 // 这样线上一更新，手机下次打开立刻是最新版，不会卡在旧缓存。
 // 👉 更新必看：每次你改完代码重新上传后，把下面这行的版本号 +1（v3→v4→v5），
 //    能确保手机把新文件重新缓存进离线包（即便不改，网络优先也会拉到新版）。
-const CACHE = 'movie-diary-v3';
+const CACHE = 'movie-diary-v4';
 
 // 预缓存：应用外壳全部文件（补全了 discover/assistant/profile/audio 等，之前漏了）
 const SHELL = [

@@ -90,7 +90,7 @@ textarea{resize:vertical;line-height:1.6;}
 .badge-done{font-size:11px;color:var(--muted);background:var(--bg-soft);padding:3px 8px;border-radius:999px;}
 
 /* ===== 电影网格与卡片 ===== */
-.movie-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.movie-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
 .movie-card{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-sm);border:1px solid var(--border);display:flex;flex-direction:column;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease;}
 .movie-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md);}
 .movie-card:active{transform:scale(.97);}
@@ -291,9 +291,12 @@ textarea{resize:vertical;line-height:1.6;}
 .movie-grid .movie-card:nth-child(7){animation-delay:.18s;}
 .movie-grid .movie-card:nth-child(8){animation-delay:.21s;}
 .movie-grid .movie-card:nth-child(9){animation-delay:.24s;}
+.movie-grid .movie-card:nth-child(10){animation-delay:.27s;}
+.movie-grid .movie-card:nth-child(11){animation-delay:.30s;}
+.movie-grid .movie-card:nth-child(12){animation-delay:.33s;}
 @keyframes cardIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 
-@media (max-width:380px){ .movie-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:380px){ .movie-grid{grid-template-columns:repeat(3,1fr);} }
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important;}
 }
