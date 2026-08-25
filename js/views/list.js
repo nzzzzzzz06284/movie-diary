@@ -6,6 +6,7 @@ App.views.list = (function () {
   let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set() };
   let records = [];
   let key = '';
+  let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
 
   function posterBlock(poster) {
     if (poster) return `<div class="poster"><img src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
@@ -48,17 +49,18 @@ App.views.list = (function () {
       </div>`;
     }).join('') + `</div>`;
     box.querySelectorAll('.movie-card').forEach(c => {
-      if (state.selecting) {
-        c.onclick = () => {
-          const id = c.dataset.id;
+      c.onclick = () => {
+        if (suppressClick) { suppressClick = false; return; }
+        const id = c.dataset.id;
+        if (state.selecting) {
           if (state.selSet.has(id)) state.selSet.delete(id); else state.selSet.add(id);
           c.classList.toggle('sel');
           const ck = c.querySelector('.check'); if (ck) ck.classList.toggle('on');
           updateListBatch();
-        };
-      } else {
-        c.onclick = () => App.router.go('#/detail/' + c.dataset.id);
-      }
+        } else {
+          App.router.go('#/detail/' + c.dataset.id);
+        }
+      };
     });
   }
 
@@ -218,10 +220,9 @@ App.views.list = (function () {
         <div id="filters"></div>
         <div id="library" style="margin-top:10px"></div>
       </div>
-      <div id="listBatchBar" class="batch-bar" hidden>
-        <button class="btn sm" id="listCancel">取消</button>
-        <span class="batch-count">已选 <b id="listCount">0</b> 部</span>
-        <button class="btn danger" id="listDel">删除</button>
+      <div id="listBatchBar" class="fab-select" hidden>
+        <span class="sel-count" id="listCount">已选 0 部</span>
+        <button class="btn danger fab-add" id="listDel">删除</button>
       </div>`;
     renderFilters();
     renderLibrary();
@@ -233,12 +234,13 @@ App.views.list = (function () {
     if (cancel) cancel.onclick = exitMulti;
     const del = document.getElementById('listDel');
     if (del) del.onclick = batchDelete;
+    bindLongPressLibrary(root);
   }
 
   function updateListBatch() {
     const bar = document.getElementById('listBatchBar');
     if (!bar) return;
-    const c = document.getElementById('listCount'); if (c) c.textContent = state.selSet.size;
+    const c = document.getElementById('listCount'); if (c) c.textContent = '已选 ' + state.selSet.size + ' 部';
     const d = document.getElementById('listDel'); if (d) d.style.opacity = state.selSet.size ? '1' : '.5';
   }
   function enterMulti() {
@@ -307,6 +309,34 @@ App.views.list = (function () {
         App.db.deleteRecord(dup[i++]).then(del);
       })();
     });
+  }
+
+  // 长按电影卡片 → 进入多选模式并自动勾选（事件委托，容器只绑一次，避免泄漏）
+  function bindLongPressLibrary(root) {
+    const box = root.querySelector('#library');
+    if (!box || box._lpBound) return;
+    box._lpBound = true;
+    let timer = null, target = null, sx = 0, sy = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } target = null; };
+    box.addEventListener('touchstart', e => {
+      const card = e.target.closest('.movie-card'); if (!card) return;
+      target = card; sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+      timer = setTimeout(() => {
+        timer = null;
+        suppressClick = true; // 抑制松手后紧随的 click，避免刚勾选又被取消
+        const id = target.dataset.id;
+        if (!state.selecting) enterMulti();
+        const fresh = box.querySelector('.movie-card[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+        if (fresh && !state.selSet.has(id)) {
+          state.selSet.add(id); fresh.classList.add('sel');
+          const ck = fresh.querySelector('.check'); if (ck) ck.classList.add('on');
+          updateListBatch();
+        }
+      }, 480);
+    }, { passive: true });
+    box.addEventListener('touchmove', e => { if (!timer) return; const t = e.touches[0]; if (Math.abs(t.clientX - sx) > 12 || Math.abs(t.clientY - sy) > 12) cancel(); }, { passive: true });
+    box.addEventListener('touchend', cancel, { passive: true });
+    box.addEventListener('touchcancel', cancel, { passive: true });
   }
 
   // 初始化时加载数据

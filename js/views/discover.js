@@ -6,6 +6,7 @@ App.views.discover = (function () {
   let state = { kind: 'popular', genre: null, lang: null, year: null, page: 1, totalPages: 1, query: '', loading: false,
                 selecting: false, selected: new Set(), movies: [], records: [], key: '' };
   let scrollBound = false; // 滚动自动加载只绑定一次
+  let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
   let genreCache = null;   // TMDB 类型列表缓存
 
   function posterBlock(poster) {
@@ -56,6 +57,7 @@ App.views.discover = (function () {
       </div>`;
     }).join('');
     box.querySelectorAll('.movie-card.disc').forEach(c => c.onclick = () => {
+      if (suppressClick) { suppressClick = false; return; }
       const m = { tmdbId: c.dataset.tmdb, title: c.dataset.title, year: c.dataset.year, poster: c.dataset.poster, overview: c.dataset.over };
       if (state.selecting) {
         if (c.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
@@ -73,13 +75,30 @@ App.views.discover = (function () {
   function updateBatch() {
     const bar = document.getElementById('batchBar');
     if (!bar) return;
-    document.getElementById('batchCount').textContent = state.selected.size;
-    bar.querySelector('#batchAdd').style.opacity = state.selected.size ? '1' : '.5';
+    const c = document.getElementById('selCount');
+    if (c) c.textContent = '已选 ' + state.selected.size + ' 部';
+    const add = bar.querySelector('#batchAdd');
+    if (add) add.style.opacity = state.selected.size ? '1' : '.5';
+  }
+
+  // 底部「加载更多 / 加载中 / 失败重试」状态（避免划到一半静默卡死）
+  function updateMore() {
+    const more = document.getElementById('discMore');
+    if (!more) return;
+    if (state.page < state.totalPages) {
+      more.innerHTML = '<button class="btn sm" id="discLoadMore">加载更多</button>';
+      const b = document.getElementById('discLoadMore');
+      if (b) b.onclick = () => loadList(state.kind, state.page + 1, true);
+    } else {
+      more.innerHTML = state.movies.length ? '<span class="muted">已经到底啦 🎬</span>' : '';
+    }
   }
 
   function loadList(kind, page, append) {
     if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
     state.loading = true;
+    const more = document.getElementById('discMore');
+    if (more) more.innerHTML = '<span class="muted">加载中…</span>';
     const req = App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page);
     req.then(data => {
       state.page = data.page; state.totalPages = data.totalPages;
@@ -94,9 +113,20 @@ App.views.discover = (function () {
       state.loading = false;
       if (!append) resetWall(); else if (wallCards.length) rekeyWall();
       renderGrid();
-      const more = document.getElementById('discMore');
-      if (more) more.style.display = (state.page < state.totalPages) ? 'block' : 'none';
-    }).catch(() => { state.loading = false; renderMsg('加载失败（检查密钥或网络）'); });
+      updateMore();
+    }).catch(() => {
+      state.loading = false;
+      if (!append) { renderMsg('加载失败（检查密钥或网络）'); }
+      else {
+        // 追加失败：保留已加载内容，给重试入口（不整页清空）
+        const m2 = document.getElementById('discMore');
+        if (m2) {
+          m2.innerHTML = '加载失败，<a class="link" id="discRetry">点此重试</a>';
+          const r = document.getElementById('discRetry');
+          if (r) r.onclick = () => loadList(state.kind, state.page + 1, true);
+        }
+      }
+    });
   }
 
   function renderMsg(msg) {
@@ -567,10 +597,10 @@ App.views.discover = (function () {
         <button class="btn sm" id="discMulti">多选</button>
       </div>
       <div id="discGrid" class="movie-grid discover"></div>
-      <div id="batchBar" class="batch-bar" hidden>
-        <button class="btn sm" id="batchCancel">取消</button>
-        <span class="batch-count">已选 <b id="batchCount">0</b> 部</span>
-        <button class="btn primary" id="batchAdd">添加</button>
+      <div id="discMore" class="disc-more"></div>
+      <div id="batchBar" class="fab-select" hidden>
+        <span class="sel-count" id="selCount">已选 0 部</span>
+        <button class="btn primary fab-add" id="batchAdd">添加</button>
       </div>`;
 
     root.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
@@ -587,7 +617,6 @@ App.views.discover = (function () {
     }, 400);
     root.querySelector('#discClear').onclick = () => { input.value = ''; state.query = ''; root.querySelector('#discClear').style.display = 'none'; loadList(state.kind, 1, false); };
     root.querySelector('#discMulti').onclick = () => { if (state.selecting) exitSelect(); else enterSelect(); };
-    root.querySelector('#batchCancel').onclick = () => exitSelect();
     root.querySelector('#batchAdd').onclick = () => batchAdd();
     // 筛选栏：类型（含「全部」）/ 地区 / 年份
     paintFilters(root);
@@ -614,7 +643,37 @@ App.views.discover = (function () {
       });
     }
 
+    bindLongPressGrid(root);
     loadList(state.kind, 1, false);
+  }
+
+  // 长按电影卡片 → 进入多选模式并自动勾选（事件委托，容器只绑一次，避免泄漏）
+  function bindLongPressGrid(root) {
+    const box = root.querySelector('#discGrid');
+    if (!box || box._lpBound) return;
+    box._lpBound = true;
+    let timer = null, target = null, sx = 0, sy = 0;
+    const cancel = () => { if (timer) { clearTimeout(timer); timer = null; } target = null; };
+    box.addEventListener('touchstart', e => {
+      const card = e.target.closest('.movie-card.disc'); if (!card) return;
+      target = card; sx = e.touches[0].clientX; sy = e.touches[0].clientY;
+      timer = setTimeout(() => {
+        timer = null;
+        suppressClick = true; // 抑制松手后紧随的 click，避免刚勾选又被取消
+        const id = target.dataset.id;
+        if (!state.selecting) enterSelect();
+        const fresh = box.querySelector('.movie-card.disc[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
+        if (fresh && fresh.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (fresh && !state.selected.has(id)) {
+          state.selected.add(id); fresh.classList.add('sel');
+          const ck = fresh.querySelector('.check'); if (ck) ck.classList.add('on');
+          updateBatch();
+        }
+      }, 480);
+    }, { passive: true });
+    box.addEventListener('touchmove', e => { if (!timer) return; const t = e.touches[0]; if (Math.abs(t.clientX - sx) > 12 || Math.abs(t.clientY - sy) > 12) cancel(); }, { passive: true });
+    box.addEventListener('touchend', cancel, { passive: true });
+    box.addEventListener('touchcancel', cancel, { passive: true });
   }
 
   function init() {
