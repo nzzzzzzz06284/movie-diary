@@ -82,7 +82,14 @@ App.views.discover = (function () {
     const req = App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page);
     req.then(data => {
       state.page = data.page; state.totalPages = data.totalPages;
-      state.movies = append ? state.movies.concat(data.results) : data.results;
+      if (append) {
+        // 去重：TMDB「最新」等接口相邻页会重复返回同一部，按 tmdbId 过滤已显示的
+        const have = new Set(state.movies.map(m => String(m.tmdbId)));
+        const fresh = (data.results || []).filter(m => m.tmdbId && !have.has(String(m.tmdbId)));
+        state.movies = state.movies.concat(fresh);
+      } else {
+        state.movies = data.results || [];
+      }
       state.loading = false;
       if (!append) resetWall(); else if (wallCards.length) rekeyWall();
       renderGrid();

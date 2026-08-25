@@ -90,7 +90,7 @@ textarea{resize:vertical;line-height:1.6;}
 .badge-done{font-size:11px;color:var(--muted);background:var(--bg-soft);padding:3px 8px;border-radius:999px;}
 
 /* ===== 电影网格与卡片 ===== */
-.movie-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.movie-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
 .movie-card{background:var(--card);border-radius:14px;overflow:hidden;box-shadow:var(--shadow-sm);border:1px solid var(--border);display:flex;flex-direction:column;cursor:pointer;transition:transform .18s ease,box-shadow .18s ease;}
 .movie-card:hover{transform:translateY(-3px);box-shadow:var(--shadow-md);}
 .movie-card:active{transform:scale(.97);}
@@ -261,13 +261,14 @@ textarea{resize:vertical;line-height:1.6;}
 .chat-close{width:32px;height:32px;border:none;background:var(--bg-soft);border-radius:50%;font-size:16px;line-height:1;cursor:pointer;color:var(--text);flex:none;}
 .chat-back{width:34px;height:34px;border:none;background:none;color:var(--text);font-size:26px;line-height:1;cursor:pointer;padding:0;}
 .chat-title{flex:1;display:flex;align-items:center;gap:10px;min-width:0;}
-.chat-avatar{width:40px;height:40px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--green));display:flex;align-items:center;justify-content:center;font-size:21px;flex:none;box-shadow:var(--shadow-sm);}
+.chat-avatar{width:40px;height:40px;border-radius:50%;background:url(../assets/avatar.svg) center/cover no-repeat,linear-gradient(135deg,var(--blue),var(--green));display:flex;align-items:center;justify-content:center;font-size:0;flex:none;box-shadow:var(--shadow-sm);}
 .chat-name{font-size:15px;font-weight:700;color:var(--text);}
 .chat-status{font-size:11px;color:var(--muted);}
 .chat-reset{width:32px;height:32px;border:none;background:var(--bg-soft);border-radius:50%;font-size:14px;cursor:pointer;color:var(--text);flex:none;}
 .chat-msgs{flex:1;overflow-y:auto;padding:14px 12px;display:flex;flex-direction:column;gap:14px;}
 .chat-msg{display:flex;gap:8px;align-items:flex-end;}
 .chat-msg .avatar{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:17px;flex:none;background:var(--surface);box-shadow:var(--shadow-sm);}
+.chat-msg .avatar.bot-av{background:url(../assets/avatar.svg) center/cover no-repeat;background-color:transparent;}
 .chat-msg .bubble{max-width:74%;padding:10px 13px;font-size:14px;line-height:1.55;white-space:pre-wrap;word-break:break-word;color:var(--text);animation:fadeUp .22s ease;}
 .chat-msg.bot{align-self:flex-start;}
 .chat-msg.bot .bubble{background:var(--surface);border:1px solid var(--border);border-radius:4px 14px 14px 14px;box-shadow:var(--shadow-sm);}
@@ -290,9 +291,12 @@ textarea{resize:vertical;line-height:1.6;}
 .movie-grid .movie-card:nth-child(7){animation-delay:.18s;}
 .movie-grid .movie-card:nth-child(8){animation-delay:.21s;}
 .movie-grid .movie-card:nth-child(9){animation-delay:.24s;}
+.movie-grid .movie-card:nth-child(10){animation-delay:.27s;}
+.movie-grid .movie-card:nth-child(11){animation-delay:.30s;}
+.movie-grid .movie-card:nth-child(12){animation-delay:.33s;}
 @keyframes cardIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 
-@media (max-width:380px){ .movie-grid{grid-template-columns:repeat(2,1fr);} }
+@media (max-width:380px){ .movie-grid{grid-template-columns:repeat(3,1fr);} }
 @media (prefers-reduced-motion:reduce){
   *{animation:none!important;transition:none!important;}
 }

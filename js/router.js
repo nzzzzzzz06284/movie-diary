@@ -39,7 +39,7 @@ App.router = (function () {
     // 给底部导航栏绑定点击跳转（之前漏了，导致点不动）
     document.querySelectorAll('.tab').forEach(t => t.onclick = () => { App.audio && App.audio.sfx('click'); go(t.dataset.route); });
     window.addEventListener('hashchange', render);
-    if (!location.hash) location.hash = '#/list';
+    if (!location.hash) location.hash = '#/discover';
     else render();
   }
 
