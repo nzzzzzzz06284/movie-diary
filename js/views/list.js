@@ -7,6 +7,7 @@ App.views.list = (function () {
   let records = [];
   let key = '';
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
+  let srSeq = 0;             // 搜索序号：慢的旧结果不许盖掉新一次搜索（否则"搜一次就搜不了了"）
 
   function posterBlock(poster) {
     if (poster) return `<div class="poster"><img src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
@@ -200,11 +201,16 @@ App.views.list = (function () {
       document.getElementById('manualFromSearch').onclick = () => App.router.go('#/edit?title=' + encodeURIComponent(q));
       return;
     }
+    const my = ++srSeq;
     App.tmdb.search(q, key)
-      .then(list => { if (!list.length) renderResultsMsg('没找到相关电影，可手动添加', true); else renderResults(list); })
+      .then(list => {
+        if (my !== srSeq) return;   // 已经有更新的搜索了，丢弃这份旧结果
+        if (!list.length) renderResultsMsg('没找到相关电影，可手动添加', true); else renderResults(list);
+      })
       .catch(err => {
-        if (err.message === 'NO_KEY') renderResultsMsg('未配置 TMDB 密钥', true);
-        else renderResultsMsg('自动搜索暂时不可用（网络/CORS 限制），可手动添加', true);
+        if (my !== srSeq) return;
+        if (err && err.message === 'NO_KEY') renderResultsMsg('未配置 TMDB 密钥', true);
+        else renderResultsMsg('网络不太稳，没搜到，改几个字再试或手动添加', true);
       });
   }
 

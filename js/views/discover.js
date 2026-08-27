@@ -8,6 +8,18 @@ App.views.discover = (function () {
   let scrollBound = false; // 滚动自动加载只绑定一次
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
   let genreCache = null;   // TMDB 类型列表缓存
+  let reqSeq = 0;          // 请求序号：只认最后一次请求的结果，防止慢的旧请求覆盖新筛选（"点分类没反应"的真凶）
+  let searchSeq = 0;       // 搜索序号：同理，避免上一次搜索结果盖掉这一次
+
+  // 类型兜底表：TMDB 类型接口拉不到时也要能点（否则整条类型栏空白，看着像"点了没反应"）
+  const FALLBACK_GENRES = [
+    { id: 28, name: '动作' }, { id: 12, name: '冒险' }, { id: 16, name: '动画' },
+    { id: 35, name: '喜剧' }, { id: 80, name: '犯罪' }, { id: 99, name: '纪录' },
+    { id: 18, name: '剧情' }, { id: 10751, name: '家庭' }, { id: 14, name: '奇幻' },
+    { id: 36, name: '历史' }, { id: 27, name: '恐怖' }, { id: 10402, name: '音乐' },
+    { id: 9648, name: '悬疑' }, { id: 10749, name: '爱情' }, { id: 878, name: '科幻' },
+    { id: 53, name: '惊悚' }, { id: 10752, name: '战争' }, { id: 37, name: '西部' }
+  ];
 
   function posterBlock(poster) {
     if (poster) return `<div class="poster"><img loading="lazy" decoding="async" src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
@@ -85,6 +97,8 @@ App.views.discover = (function () {
   function updateMore() {
     const more = document.getElementById('discMore');
     if (!more) return;
+    more.style.display = '';   // 之前失败/搜索时被设成 none，这里必须恢复，否则再也不出现「加载更多」
+    if (state.query) { more.innerHTML = ''; return; }
     if (state.page < state.totalPages) {
       more.innerHTML = '<button class="btn sm" id="discLoadMore">加载更多</button>';
       const b = document.getElementById('discLoadMore');
@@ -94,59 +108,104 @@ App.views.discover = (function () {
     }
   }
 
-  function loadList(kind, page, append) {
-    if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
-    state.loading = true;
-    const more = document.getElementById('discMore');
-    if (more) more.innerHTML = '<span class="muted">加载中…</span>';
-    const req = App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page);
-    req.then(data => {
-      state.page = data.page; state.totalPages = data.totalPages;
-      if (append) {
-        // 去重：TMDB「最新」等接口相邻页会重复返回同一部，按 tmdbId 过滤已显示的
-        const have = new Set(state.movies.map(m => String(m.tmdbId)));
-        const fresh = (data.results || []).filter(m => m.tmdbId && !have.has(String(m.tmdbId)));
-        state.movies = state.movies.concat(fresh);
-      } else {
-        state.movies = data.results || [];
-      }
-      state.loading = false;
-      if (!append) resetWall(); else if (wallCards.length) rekeyWall();
-      renderGrid();
-      updateMore();
-    }).catch(() => {
-      state.loading = false;
-      if (!append) { renderMsg('加载失败（检查密钥或网络）'); }
-      else {
-        // 追加失败：保留已加载内容，给重试入口（不整页清空）
-        const m2 = document.getElementById('discMore');
-        if (m2) {
-          m2.innerHTML = '加载失败，<a class="link" id="discRetry">点此重试</a>';
-          const r = document.getElementById('discRetry');
-          if (r) r.onclick = () => loadList(state.kind, state.page + 1, true);
-        }
-      }
-    });
+  // 骨架屏：点了筛选立刻有反馈，不再"点了像没反应"
+  function renderSkeleton() {
+    const box = document.getElementById('discGrid');
+    if (!box) return;
+    let h = '';
+    for (let i = 0; i < 8; i++) h += '<div class="movie-card sk"><div class="poster ph"></div><div class="body"><p class="name"></p><div class="meta"><span></span></div></div></div>';
+    box.innerHTML = h;
   }
 
-  function renderMsg(msg) {
+  function loadList(kind, page, append) {
+    if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
+    // 追加时若上一次还在飞，直接忽略，避免同一页被重复拉、page 被搞乱
+    if (append && state.loading) return;
+    const my = ++reqSeq;          // 本次请求编号
+    searchSeq++;                  // 让在飞的搜索结果作废，避免它盖掉筛选结果
+    state.loading = true;
+    if (!append) { state.query = ''; renderSkeleton(); }
+    const more = document.getElementById('discMore');
+    if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">加载中…</span>'; }
+
+    App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page)
+      .then(data => {
+        if (my !== reqSeq) return;       // 已有更新的请求，丢弃这份旧结果
+        state.page = data.page; state.totalPages = data.totalPages;
+        if (append) {
+          // 去重：TMDB「最新」等接口相邻页会重复返回同一部，按 tmdbId 过滤已显示的
+          const have = new Set(state.movies.map(m => String(m.tmdbId)));
+          const fresh = (data.results || []).filter(m => m.tmdbId && !have.has(String(m.tmdbId)));
+          state.movies = state.movies.concat(fresh);
+          // 这一页全是重复且还有后续页时，自动往后再取一页，避免"划不动"
+          if (!fresh.length && state.page < state.totalPages) {
+            state.loading = false;
+            loadList(kind, state.page + 1, true);
+            return;
+          }
+        } else {
+          state.movies = data.results || [];
+        }
+        state.loading = false;
+        if (!append) resetWall(); else if (wallCards.length) rekeyWall();
+        renderGrid();
+        updateMore();
+      })
+      .catch(() => {
+        if (my !== reqSeq) return;
+        state.loading = false;
+        if (!append) {
+          renderMsg('这批没加载出来（网络不稳）', () => loadList(kind, 1, false));
+        } else {
+          // 追加失败：保留已加载内容，给重试入口（不整页清空）
+          const m2 = document.getElementById('discMore');
+          if (m2) {
+            m2.style.display = '';
+            m2.innerHTML = '没加载出来，<a class="link" id="discRetry">点此重试</a>';
+            const r = document.getElementById('discRetry');
+            if (r) r.onclick = () => loadList(state.kind, state.page + 1, true);
+          }
+        }
+      });
+  }
+
+  // 空/错误提示，可带重试按钮
+  function renderMsg(msg, retry) {
     const box = document.getElementById('discGrid');
-    if (box) box.innerHTML = `<div class="empty"><div class="big">🎬</div>${msg}</div>`;
-    const more = document.getElementById('discMore'); if (more) more.style.display = 'none';
+    if (box) {
+      box.innerHTML = `<div class="empty"><div class="big">🎬</div>${msg}`
+        + (retry ? `<div style="margin-top:12px"><button class="btn sm primary" id="discMsgRetry">重新加载</button></div>` : '')
+        + `</div>`;
+      if (retry) {
+        const b = document.getElementById('discMsgRetry');
+        if (b) b.onclick = retry;
+      }
+    }
+    const more = document.getElementById('discMore');
+    if (more) { more.style.display = ''; more.innerHTML = ''; }
   }
 
   function doSearch(q) {
     if (!q) { loadList(state.kind, 1, false); return; }
     if (!state.key) { renderMsg('需要 TMDB 密钥才能搜索'); return; }
+    const my = ++searchSeq;
+    reqSeq++;                 // 让在飞的列表请求作废，别盖掉搜索结果
+    state.loading = false;    // 搜索不参与分页，避免把 loading 卡住导致后续都不响应
+    renderSkeleton();
+    const more = document.getElementById('discMore');
+    if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">搜索中…</span>'; }
     App.tmdb.search(q, state.key).then(list => {
-      if (!list.length) renderMsg('没找到相关电影');
-      else {
-        state.movies = list;
-        resetWall();
-        renderGrid();
-        const more = document.getElementById('discMore'); if (more) more.style.display = 'none';
-      }
-    }).catch(() => renderMsg('搜索暂时不可用（网络/CORS 限制）'));
+      if (my !== searchSeq) return;
+      if (!list.length) { renderMsg('没找到「' + App.util.escapeHtml(q) + '」相关的电影'); return; }
+      state.movies = list;
+      state.page = 1; state.totalPages = 1;
+      resetWall();
+      renderGrid();
+      if (more) more.innerHTML = '';
+    }).catch(() => {
+      if (my !== searchSeq) return;
+      renderMsg('搜索没成功，网络不太稳', () => doSearch(q));
+    });
   }
 
   // 单个加入：弹窗填日期/评分，可 enrich 资料
@@ -244,20 +303,31 @@ App.views.discover = (function () {
     return `<span class="chip ${active ? 'active' : ''}" data-${key}="${val}">${label}</span>`;
   }
 
+  // 筛选点击统一入口：先刷新选中态（立刻有反馈），再发请求
+  function applyFilter(root) {
+    paintFilters(root);
+    resetFiltersAndLoad(root);
+  }
+
   function paintFilters(root) {
-    // 类型栏：全部 + TMDB 类型（缓存列表避免每次点击都请求）
-    if (state.key) {
-      const getGenres = genreCache ? Promise.resolve(genreCache) : App.tmdb.genres(state.key).then(gs => { genreCache = gs; return gs; });
-      getGenres.then(gs => {
-        const bar = root.querySelector('#discGenres'); if (!bar) return;
-        bar.innerHTML = `<span class="f-label">类型</span>` + filterChip(!state.genre, 'g', '', '全部')
-          + gs.slice(0, 18).map(g => filterChip(String(state.genre) === String(g.id), 'g', g.id, App.util.escapeHtml(g.name))).join('');
-        bar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
-          const v = c.dataset.g;
-          state.genre = v ? ((String(state.genre) === v) ? null : v) : null;
-          resetFiltersAndLoad(root); paintFilters(root);
-        });
-      }).catch(() => {});
+    // 类型栏：同步先用「缓存 / 兜底表」画出来，保证一定能点；随后再静默拉官方中文名刷新
+    const gbar = root.querySelector('#discGenres');
+    if (gbar) {
+      const gs = genreCache || FALLBACK_GENRES;
+      gbar.innerHTML = `<span class="f-label">类型</span>` + filterChip(!state.genre, 'g', '', '全部')
+        + gs.slice(0, 18).map(g => filterChip(String(state.genre) === String(g.id), 'g', g.id, App.util.escapeHtml(g.name))).join('');
+      gbar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
+        const v = c.dataset.g;
+        state.genre = v ? ((String(state.genre) === v) ? null : v) : null;
+        applyFilter(root);
+      });
+      if (!genreCache && state.key) {
+        App.tmdb.genres(state.key).then(list => {
+          if (!list || !list.length) return;
+          genreCache = list;
+          if (document.body.contains(gbar)) paintFilters(root); // 只刷新文案，不重新请求列表
+        }).catch(() => {});
+      }
     }
     // 地区栏
     const lbar = root.querySelector('#discLangs');
@@ -268,7 +338,7 @@ App.views.discover = (function () {
       lbar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
         const v = c.dataset.l;
         state.lang = v ? (state.lang === v ? null : v) : null;
-        resetFiltersAndLoad(root); paintFilters(root);
+        applyFilter(root);
       });
     }
     // 年份栏：近 5 年 + 更早
@@ -282,7 +352,7 @@ App.views.discover = (function () {
       ybar.querySelectorAll('.chip').forEach(c => c.onclick = () => {
         const v = c.dataset.y;
         state.year = v ? (state.year === v ? null : v) : null;
-        resetFiltersAndLoad(root); paintFilters(root);
+        applyFilter(root);
       });
     }
   }
@@ -291,6 +361,7 @@ App.views.discover = (function () {
     state.query = '';
     const inp = root.querySelector('#discSearch'); if (inp) inp.value = '';
     const clr = root.querySelector('#discClear'); if (clr) clr.style.display = 'none';
+    state.loading = false;          // 上一次可能没 settle，别让它把新请求挡住
     loadList(state.kind, 1, false);
   }
 
@@ -300,6 +371,7 @@ App.views.discover = (function () {
   let wallDrag = { on: false, x0: 0, dx: 0, t0: 0, moved: false };
   let wallTimer2 = null, wallCollapsed = false, heroEl = null, wallSuppressClick = false;
   let collapseBound = false, ticking = false;
+  let wallWinBound = false;   // window 级拖拽监听只绑一次，避免反复进入页面越绑越多
 
   const wMod = (i, n) => ((i % n) + n) % n;
 
@@ -502,8 +574,12 @@ App.views.discover = (function () {
     wall.addEventListener('touchend', end, { passive: true });
     wall.addEventListener('touchcancel', end, { passive: true });
     wall.addEventListener('mousedown', e => { if (e.button === 0) { e.preventDefault(); start(e.clientX); } });
-    window.addEventListener('mousemove', e => { if (wallDrag.on) move(e.clientX); }, { passive: true });
-    window.addEventListener('mouseup', () => { if (wallDrag.on) end(); });
+    // window 上的监听只能绑一次：海报墙每次进页面都是新元素，若跟着重复绑会越攒越多、页面越用越卡
+    if (!wallWinBound) {
+      wallWinBound = true;
+      window.addEventListener('mousemove', e => { if (wallDrag.on) move(e.clientX); }, { passive: true });
+      window.addEventListener('mouseup', () => { if (wallDrag.on) end(); });
+    }
     // 点击：中间海报=打开；两侧海报=跳转
     wall.addEventListener('click', e => {
       if (wallSuppressClick) { wallSuppressClick = false; return; }
@@ -593,7 +669,7 @@ App.views.discover = (function () {
         <div class="genre-bar" id="discYears"></div>
       </div>
       <div class="view-block" style="display:flex;align-items:center;justify-content:space-between;margin:2px 0 8px">
-        <div class="section-title" style="margin:0">电影库 <span class="hint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
+        <div class="section-title" style="margin:0">电影库 <span class="hint" id="discKindHint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
         <button class="btn sm" id="discMulti">多选</button>
       </div>
       <div id="discGrid" class="movie-grid discover"></div>
@@ -606,8 +682,9 @@ App.views.discover = (function () {
     root.querySelectorAll('.seg-btn').forEach(b => b.onclick = () => {
       state.kind = b.dataset.kind;
       root.querySelectorAll('.seg-btn').forEach(x => x.classList.toggle('active', x === b));
-      state.query = '';
-      loadList(state.kind, 1, false);
+      const hint = root.querySelector('#discKindHint');
+      if (hint) hint.textContent = kindName[state.kind] || '';
+      resetFiltersAndLoad(root);   // 会清搜索框、解掉可能卡住的 loading，再重新拉第一页
     });
     const input = root.querySelector('#discSearch');
     input.oninput = debounce((e) => {

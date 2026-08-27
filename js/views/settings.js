@@ -18,6 +18,12 @@ App.views.settings = (function () {
           <input type="text" id="apiKey" value="${App.util.escapeHtml(settings.tmdbApiKey || '')}" placeholder="在 themoviedb.org 注册后获取">
         </div>
         <button class="btn primary block" id="saveKey">保存密钥</button>
+        <div style="height:8px"></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn block" id="testTmdb">检测连接</button>
+          <button class="btn block" id="fixTmdb">修复加载问题</button>
+        </div>
+        <p class="muted" id="tmdbTest" style="margin-top:6px"></p>
         <p class="muted" style="margin-top:8px"><b>免费获取步骤（约 1 分钟）：</b><br>① 打开 <b>themoviedb.org</b> 用邮箱注册并登录；<br>② 点右上角头像 → <b>设置（Settings）</b> → 左侧 <b>API</b>；<br>③ 申请 API 密钥（选 Developer，用途随便填"个人电影记录"）；<br>④ 复制 <b>v3 API Key</b>（一长串字母数字）粘到上面保存。<br>密钥只存在你本地浏览器，用于搜片名自动填海报/导演/演员；没有也能手动添加。</p>
       </div>
 
@@ -103,6 +109,22 @@ App.views.settings = (function () {
       settings.tmdbApiKey = document.getElementById('apiKey').value.trim();
       App.db.saveSettings(settings).then(() => { App.util.toast('密钥已保存'); App.audio.sfx('success'); });
     };
+    // 连通性自检 / 缓存修复（电影库加载不出来时的第一手段）
+    const tEl = document.getElementById('tmdbTest');
+    document.getElementById('testTmdb').onclick = () => {
+      const k = document.getElementById('apiKey').value.trim();
+      if (!k) { tEl.textContent = '先填密钥再检测'; return; }
+      tEl.textContent = '检测中…（最多等 8 秒）';
+      App.tmdb.ping(k).then(ok => {
+        tEl.textContent = ok ? '✅ 连接正常，电影库可以正常加载' : '❌ 连不上 TMDB：可能是密钥不对、或当前网络被限制（换 WiFi / 数据流量再试）';
+      });
+    };
+    document.getElementById('fixTmdb').onclick = () => {
+      App.tmdb.clearCache();
+      tEl.textContent = '✅ 已清空接口缓存，回「电影库」重新加载试试';
+      App.util.toast('缓存已清空');
+    };
+
     document.getElementById('exportBtn').onclick = () => App.util.exportAll();
     const fileInput = document.getElementById('importFile');
     document.getElementById('importBtn').onclick = () => fileInput.click();
