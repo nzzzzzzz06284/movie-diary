@@ -27,8 +27,10 @@ App.router = (function () {
     // 深色沉浸视图：电影库 / 我的电影库
     const isDark = name === 'discover' || name === 'list';
     document.body.classList.toggle('dark-view', isDark);
+    // theme-color 与头部渐变顶部同色（浅蓝），让手机状态栏（电量/WiFi 区）自然融入，
+    // 不出现生硬分界线；渐变左上角固定为 --blue，所有视图都保持一致
     const tc = document.querySelector('meta[name="theme-color"]');
-    if (tc) tc.setAttribute('content', isDark ? '#0e1615' : '#3f9d95');
+    if (tc) tc.setAttribute('content', '#a9d6e5');
 
     if (!view) { root.innerHTML = '<div class="empty">页面不存在</div>'; return; }
     try {

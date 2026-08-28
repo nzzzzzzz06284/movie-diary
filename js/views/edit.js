@@ -28,26 +28,30 @@ App.views.edit = (function () {
     rating = firstEntry.rating || 0;
   }
 
-  function starPicker(elId) {
+  function starPicker(elId, onChange) {
     const box = document.getElementById(elId);
     function paint() {
       box.innerHTML = [1,2,3,4,5].map(i => `<span class="s ${i <= rating ? 'on' : ''}" data-i="${i}">★</span>`).join('');
-      box.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paint(); });
+      box.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paint(); if (onChange) onChange(); });
     }
     paint();
   }
 
-  function renderTags() {
+  function renderTags(onChange) {
     const box = document.getElementById('tagBox');
     box.innerHTML = (allTags.length ? allTags.map(t => `<span class="chip ${selTags.has(t) ? 'active' : ''}" data-t="${App.util.escapeHtml(t)}">${App.util.escapeHtml(t)}</span>`).join('') : '<span class="muted">还没有标签，下面新建</span>');
     box.querySelectorAll('.chip').forEach(c => c.onclick = () => {
-      const t = c.dataset.t; if (selTags.has(t)) selTags.delete(t); else selTags.add(t); renderTags();
+      const t = c.dataset.t; if (selTags.has(t)) selTags.delete(t); else selTags.add(t); renderTags(onChange); if (onChange) onChange();
     });
   }
 
   function render(param, root) {
+    const isNew = !param;
     root.innerHTML = `
-      <h2 style="margin:4px 2px 14px">${param ? '编辑《' + App.util.escapeHtml(rec.title) + '》' : '添加电影'}</h2>
+      <div class="edit-top">
+        <button class="back-arrow" id="backBtn" aria-label="返回">←</button>
+        <h2 style="margin:0;flex:1">${param ? '编辑《' + App.util.escapeHtml(rec.title) + '》' : '添加电影'}</h2>
+      </div>
       <div class="field"><label>观影时间（可添加多次，二刷三刷都记上）</label>
         <div id="dateList" class="date-list"></div>
         <div class="row" style="margin-top:8px">
@@ -70,12 +74,58 @@ App.views.edit = (function () {
       <div class="field"><label>观影感受（首刷）</label><textarea id="fReview" placeholder="看完的心情与想法">${App.util.escapeHtml(firstEntry.review || '')}</textarea></div>
       <div class="field"><label>评论区（首刷）</label><textarea id="fComment" placeholder="一句话短评">${App.util.escapeHtml(firstEntry.comment || '')}</textarea></div>
       <div style="display:flex;gap:10px;margin-top:8px">
-        <button class="btn block" id="cancelBtn">取消</button>
-        <button class="btn primary block" id="saveBtn">保存</button>
-      </div>`;
+        <button class="btn primary block" id="doneBtn">${isNew ? '保存' : '完成'}</button>
+      </div>
+      <div class="save-hint" id="saveHint"></div>`;
 
-    starPicker('fStars');
-    renderTags();
+    // 把当前表单内容同步进 rec（不落库）
+    function collect() {
+      rec.entries = entriesData.map((e, i) => {
+        const ex = (rec.entries || [])[i];
+        return {
+          seq: i + 1,
+          watchDate: e.dateUnknown ? '' : (e.watchDate || ''),
+          rating: i === 0 ? rating : (ex ? ex.rating : 0),
+          review: i === 0 ? (document.getElementById('fReview').value || '') : (ex ? ex.review : ''),
+          comment: i === 0 ? (document.getElementById('fComment').value || '') : (ex ? ex.comment : ''),
+          quotes: ex ? ex.quotes : (i === 0 && firstEntry ? firstEntry.quotes : []),
+          dateUnknown: e.dateUnknown,
+          dateNote: e.dateNote
+        };
+      });
+      rec.watchDates = rec.entries.map(e => e.watchDate).filter(Boolean).sort();
+      rec.watchedDate = rec.watchDates[rec.watchDates.length - 1] || '';
+      rec.rating = rating;
+      rec.review = document.getElementById('fReview').value || '';
+      rec.comment = document.getElementById('fComment').value || '';
+      rec.title = (document.getElementById('fTitle').value || '').trim() || '未命名';
+      rec.posterUrl = (document.getElementById('fPoster').value || '').trim();
+      rec.overview = (document.getElementById('fOverview').value || '').trim();
+      rec.director = (document.getElementById('fDirector').value || '').trim();
+      rec.cast = (document.getElementById('fCast').value || '').split(/[，,、]/).map(s => s.trim()).filter(Boolean);
+      rec.tags = [...selTags];
+      rec.updatedAt = Date.now();
+    }
+    let saveTimer = null;
+    function scheduleSave() {
+      if (isNew) return;            // 新记录不自动存，避免存空数据
+      if (saveTimer) clearTimeout(saveTimer);
+      saveTimer = setTimeout(() => {
+        collect();
+        App.db.saveRecord(rec).then(() => {
+          const h = document.getElementById('saveHint');
+          if (h) { h.textContent = '已自动保存'; h.style.opacity = '1'; setTimeout(() => { if (h) h.style.opacity = '0'; }, 1400); }
+        }).catch(() => {});
+      }, 650);
+    }
+    function saveNow() {
+      collect();
+      if (!rec.title || rec.title === '未命名') { App.util.toast('请填写电影名'); return Promise.reject('no title'); }
+      return App.db.saveRecord(rec);
+    }
+
+    starPicker('fStars', scheduleSave);
+    renderTags(scheduleSave);
     let entriesData = (App.util.entries(rec).length ? App.util.entries(rec) : [{ seq: 1, watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [] }])
       .map(e => ({
         watchDate: e.watchDate || '',
@@ -97,25 +147,26 @@ App.views.edit = (function () {
           <input type="text" class="date-note" data-note="${i}" placeholder="大概什么时候" value="${App.util.escapeHtml(e.dateNote || '')}" ${e.dateUnknown ? '' : 'style="display:none"'}>
           <span class="x" data-del="${i}" style="cursor:pointer;color:var(--danger)">✕</span>
         </div>`).join('') || '<span class="muted">还没有观影时间</span>';
-      box.querySelectorAll('input.date-input').forEach(inp => inp.onchange = () => { entriesData[+inp.dataset.i].watchDate = inp.value; });
+      box.querySelectorAll('input.date-input').forEach(inp => inp.onchange = () => { entriesData[+inp.dataset.i].watchDate = inp.value; scheduleSave(); });
       box.querySelectorAll('input[data-unk]').forEach(cb => cb.onchange = () => {
         const i = +cb.dataset.unk; entriesData[i].dateUnknown = cb.checked;
         const row = cb.closest('.date-row');
         row.querySelector('.date-input').disabled = cb.checked;
         row.querySelector('.date-note').style.display = cb.checked ? '' : 'none';
+        scheduleSave();
       });
-      box.querySelectorAll('input.date-note').forEach(inp => inp.oninput = () => { entriesData[+inp.dataset.note].dateNote = inp.value; });
+      box.querySelectorAll('input.date-note').forEach(inp => inp.oninput = () => { entriesData[+inp.dataset.note].dateNote = inp.value; scheduleSave(); });
       box.querySelectorAll('.x[data-del]').forEach(x => x.onclick = () => {
         entriesData.splice(+x.dataset.del, 1);
         if (!entriesData.length) entriesData.push({ watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [], dateUnknown: false, dateNote: '' });
-        renderDates();
+        renderDates(); scheduleSave();
       });
     }
     renderDates();
     document.getElementById('addDate').onclick = () => {
       const v = document.getElementById('newDate').value || App.util.today();
       entriesData.push({ watchDate: v, rating: 0, review: '', comment: '', quotes: [], dateUnknown: false, dateNote: '' });
-      renderDates();
+      renderDates(); scheduleSave();
     };
     document.getElementById('addTag').onclick = addTag;
     document.getElementById('newTag').onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } };
@@ -123,48 +174,36 @@ App.views.edit = (function () {
       const v = document.getElementById('newTag').value.trim();
       if (!v) return;
       selTags.add(v); if (!allTags.includes(v)) allTags.push(v);
-      document.getElementById('newTag').value = ''; renderTags();
+      document.getElementById('newTag').value = ''; renderTags(scheduleSave);
     }
 
     const posterFile = document.getElementById('fPosterFile');
     posterFile.onchange = () => {
       const f = posterFile.files[0]; if (!f) return;
       App.util.compressImage(f, 600, 0.85).then(b => {
-        const r = new FileReader(); r.onload = () => { document.getElementById('fPoster').value = r.result; }; r.readAsDataURL(b);
+        const r = new FileReader(); r.onload = () => { document.getElementById('fPoster').value = r.result; scheduleSave(); };
+        r.readAsDataURL(b);
       });
     };
 
     if (key) document.getElementById('tmdbFill').onclick = tmdbFill;
 
-    document.getElementById('cancelBtn').onclick = () => history.back();
-    document.getElementById('saveBtn').onclick = () => {
-      const reviewVal = document.getElementById('fReview').value;
-      const commentVal = document.getElementById('fComment').value;
-      rec.entries = entriesData.map((e, i) => {
-        const ex = (rec.entries || [])[i];
-        return {
-          seq: i + 1,
-          watchDate: e.dateUnknown ? '' : (e.watchDate || ''),
-          rating: i === 0 ? rating : (ex ? ex.rating : 0),
-          review: i === 0 ? reviewVal : (ex ? ex.review : ''),
-          comment: i === 0 ? commentVal : (ex ? ex.comment : ''),
-          quotes: ex ? ex.quotes : (i === 0 && firstEntry ? firstEntry.quotes : []),
-          dateUnknown: e.dateUnknown,
-          dateNote: e.dateNote
-        };
-      });
-      rec.watchDates = rec.entries.map(e => e.watchDate).filter(Boolean).sort();
-      rec.watchedDate = rec.watchDates[rec.watchDates.length - 1] || '';
-      rec.rating = rating;
-      rec.review = reviewVal;
-      rec.comment = commentVal;
-      rec.title = document.getElementById('fTitle').value.trim() || '未命名';
-      rec.posterUrl = document.getElementById('fPoster').value.trim();
-      rec.overview = document.getElementById('fOverview').value.trim();
-      rec.director = document.getElementById('fDirector').value.trim();
-      rec.cast = document.getElementById('fCast').value.split(/[，,、]/).map(s => s.trim()).filter(Boolean);
-      rec.tags = [...selTags];
-      App.db.saveRecord(rec).then(() => { App.util.toast('已保存'); App.router.go('#/detail/' + rec.id); });
+    // 文本框/下拉统一绑定自动保存（已有记录才生效）
+    ['fTitle','fPoster','fOverview','fDirector','fCast','fReview','fComment','newDate','newTag'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.addEventListener('input', scheduleSave); el.addEventListener('change', scheduleSave); }
+    });
+
+    document.getElementById('backBtn').onclick = () => {
+      // 已有记录已自动保存；保险起见离开前再存一次（新建无标题则直接放弃返回）
+      if (isNew) { App.router.go('#/list'); return; }
+      saveNow().then(() => App.router.go('#/list')).catch(() => App.router.go('#/list'));
+    };
+    document.getElementById('doneBtn').onclick = () => {
+      saveNow().then(() => {
+        App.util.toast(isNew ? '已保存' : '已保存'); App.audio.sfx('success');
+        App.router.go('#/list');   // 一次返回「我的电影库」主界面
+      }).catch(() => {});
     };
   }
 
@@ -183,9 +222,9 @@ App.views.edit = (function () {
         rec.posterUrl = d.poster || m.poster; rec.overview = d.overview || m.overview;
         rec.director = d.director || ''; rec.cast = d.cast || [];
         mask.remove();
-        // 重渲染表单以填入
+        // 重渲染表单以填入（保留当前 param，避免标题/编辑上下文丢失）
         const root = document.getElementById('view');
-        render(null, root);
+        render(param, root);
         App.util.toast('已补全，可继续编辑');
       });
       mask.onclick = e => { if (e.target === mask) mask.remove(); };

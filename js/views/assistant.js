@@ -55,20 +55,20 @@ App.assistant = (function () {
 
   function appendMsg(root, role, text) {
     messages.push({ role, content: text });
-    const box = root.querySelector('#chatMsgs');
+    const box = root.querySelector('#cwMsgs');
     if (!box) return;
     const div = document.createElement('div');
     div.className = 'chat-msg ' + (role === 'user' ? 'me' : 'bot');
     const txt = App.util.escapeHtml(String(text));
     div.innerHTML = role === 'user'
       ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">👤</span>'
-      : '<span class="avatar bot-av">🤖</span><div class="bubble">' + txt + '</div>';
+      : '<span class="avatar bot-av"></span><div class="bubble">' + txt + '</div>';
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
   }
 
   function renderAll(root) {
-    const box = root.querySelector('#chatMsgs');
+    const box = root.querySelector('#cwMsgs');
     if (!box) return;
     box.innerHTML = '';
     messages.forEach(m => {
@@ -77,14 +77,14 @@ App.assistant = (function () {
       const txt = App.util.escapeHtml(String(m.content));
       div.innerHTML = m.role === 'user'
         ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">👤</span>'
-        : '<span class="avatar bot-av">🤖</span><div class="bubble">' + txt + '</div>';
+        : '<span class="avatar bot-av"></span><div class="bubble">' + txt + '</div>';
       box.appendChild(div);
     });
     box.scrollTop = box.scrollHeight;
   }
 
   function showIntro(root) {
-    appendMsg(root, 'bot', '嗨了了～我是你的观影小助手 🤖\n我连着你的电影库，可以帮你推荐电影、生成年度报告、总结观影口味。\n直接发消息就行，比如「帮我生成观影年度报告」。');
+    appendMsg(root, 'bot', '嗨了了～我是 084，你的观影小助手\n我连着你的电影库，可以帮你推荐电影、生成年度报告、总结观影口味。\n直接发消息就行，比如「帮我生成观影年度报告」。');
   }
 
   async function submit(root, text) {
@@ -105,10 +105,10 @@ App.assistant = (function () {
     const headers = { 'Content-Type': 'application/json', 'X-Hermes-Session-Id': ensureSession() };
     if (key) headers['Authorization'] = 'Bearer ' + key;
 
-    const box = root.querySelector('#chatMsgs');
+    const box = root.querySelector('#cwMsgs');
     const ph = document.createElement('div');
     ph.className = 'chat-msg bot';
-    ph.innerHTML = '<span class="avatar bot-av">🤖</span><div class="bubble">思考中…</div>';
+    ph.innerHTML = '<span class="avatar bot-av"></span><div class="bubble">思考中…</div>';
     box.appendChild(ph);
     box.scrollTop = box.scrollHeight;
 
@@ -129,7 +129,7 @@ App.assistant = (function () {
     } catch (e) {
       reply = '网络错误：' + e.message + '\n\n请确认 Hermes 正在运行、网关已开启。';
     }
-    ph.innerHTML = '<span class="avatar bot-av">🤖</span><div class="bubble">' + App.util.escapeHtml(reply) + '</div>';
+    ph.innerHTML = '<span class="avatar bot-av"></span><div class="bubble">' + App.util.escapeHtml(reply) + '</div>';
     messages.push({ role: 'bot', content: reply });
   }
 
@@ -169,23 +169,31 @@ App.assistant = (function () {
       startX = e.clientX; startY = e.clientY; dragMoved = false;
       const r = fab.getBoundingClientRect();
       fab._ox = r.left; fab._oy = r.top;
+      fab.style.transition = 'none';      // 拖动时关掉过渡，避免跟着缓动发钝
+      fab.style.willChange = 'left, top'; // 提示浏览器单独合成层，丝滑不卡
     });
+    let raf = null, nx = 0, ny = 0;
     window.addEventListener('pointermove', e => {
       if (startX == null) return;
       const dx = e.clientX - startX, dy = e.clientY - startY;
       if (!dragMoved && Math.hypot(dx, dy) > 8) dragMoved = true;
-      if (dragMoved) {
-        const w = fab.offsetWidth, vw = window.innerWidth, vh = window.innerHeight;
-        let L = fab._ox + dx, T = fab._oy + dy;
-        L = Math.max(6, Math.min(vw - w - 6, L));
-        T = Math.max(70, Math.min(vh - w - 110, T)); // 不遮顶栏/tabbar
-        fab.style.left = L + 'px'; fab.style.top = T + 'px';
+      if (!dragMoved) return;
+      const w = fab.offsetWidth, vw = window.innerWidth, vh = window.innerHeight;
+      // 先算出目标位置，攒到下一帧再写一次样式：把多次 pointermove 合并，避免每像素重排卡顿
+      nx = Math.max(6, Math.min(vw - w - 6, fab._ox + dx));
+      ny = Math.max(70, Math.min(vh - w - 110, fab._oy + dy));
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = null;
+        fab.style.left = nx + 'px'; fab.style.top = ny + 'px';
         fab.style.right = 'auto'; fab.style.bottom = 'auto';
-      }
-    });
+      });
+    }, { passive: true });
     const end = () => {
       if (startX == null) return;
       startX = null;
+      if (raf) { cancelAnimationFrame(raf); raf = null; }
+      fab.style.willChange = '';          // 拖完恢复，省合成层开销
       if (dragMoved) {
         const r = fab.getBoundingClientRect();
         const m = Math.max(10, (window.innerWidth - 520) / 2);
@@ -221,7 +229,7 @@ App.chatWin = (function () {
     win.className = 'chat-win';
     win.innerHTML = `
       <div class="chat-head" id="cwHead">
-        <span class="chat-avatar">🤖</span>
+        <span class="chat-avatar"></span>
         <div class="chat-title">
           <div class="chat-name">Hermes 观影助手</div>
           <div class="chat-status">在线</div>

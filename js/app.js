@@ -59,26 +59,39 @@ window.App = window.App || {};
       });
   }
 
-  // 键盘遮挡输入框：聚焦时把输入框顶进可见区；并监听软键盘高度变化重复调整
+  // 键盘遮挡输入框：检测真实键盘高度，弹窗/聊天窗/普通页统一适配，保证输入框永远不被盖住
   function fixKeyboard() {
-    const scrollActiveIntoView = () => {
+    const root = document.documentElement;
+    const isField = el => el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
+    const setKb = () => {
+      let kh = 0;
+      if (window.visualViewport) {
+        const vv = window.visualViewport;
+        // overlays 模式下 visualViewport 高度变小、layout 视口不变 → 差为键盘高；resizes 模式下差为 0
+        kh = Math.max(0, window.innerHeight - (vv.height + vv.offsetTop));
+      }
+      root.style.setProperty('--kb', kh + 'px');
       const el = document.activeElement;
-      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-        // 下一帧再滚，等键盘把视口压小后定位才准确
-        requestAnimationFrame(() => {
-          try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { try { el.scrollIntoView(); } catch (e2) {} }
-        });
+      const inField = isField(el);
+      // 只有真实键盘（高度>阈值）弹起时才切换布局，避免地址栏收缩误触发
+      document.body.classList.toggle('kb-open', inField && kh > 80);
+      if (inField) {
+        // 等两帧：键盘把视口压小、布局稳定后，再把聚焦框滚到可见区正中
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+        }));
       }
     };
-    document.addEventListener('focusin', scrollActiveIntoView);
+    document.addEventListener('focusin', setKb);
+    document.addEventListener('focusout', () => setTimeout(() => {
+      const el = document.activeElement;
+      if (!isField(el)) { document.body.classList.remove('kb-open'); root.style.setProperty('--kb', '0px'); }
+    }, 120));
     if (window.visualViewport) {
-      // 软键盘弹出/收起会让 visualViewport 高度变化，重新把输入框顶上来
-      let raf = null;
-      window.visualViewport.addEventListener('resize', () => {
-        if (raf) cancelAnimationFrame(raf);
-        raf = requestAnimationFrame(scrollActiveIntoView);
-      });
+      window.visualViewport.addEventListener('resize', setKb);
+      window.visualViewport.addEventListener('scroll', setKb);
     }
+    window.addEventListener('resize', setKb);
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);

@@ -49,7 +49,7 @@ App.views.discover = (function () {
       <div class="movie-card disc ${state.selecting ? 'selectable' : ''} ${sel ? 'sel' : ''} ${added ? 'added' : ''}" data-id="${id}" data-title="${App.util.escapeHtml(m.title)}" data-year="${m.year}" data-poster="${App.util.escapeHtml(m.poster)}" data-over="${App.util.escapeHtml(m.overview)}" data-tmdb="${m.tmdbId}" data-genres="${(m.genres || []).join(',')}">
         ${posterBlock(m.poster)}
         ${added ? '<span class="added-badge">已加入</span>' : ''}
-        <div class="body"><p class="name">${App.util.escapeHtml(m.title)}</p><div class="meta"><span>${m.year || ''}</span></div></div>
+        <div class="body"><p class="name">${App.util.escapeHtml(m.title)}</p><div class="meta"><span>${m.year || ''}</span>${m.rating ? `<span class="rate-num">${App.util.ratingText(m.rating)}</span>` : ''}</div></div>
         ${state.selecting ? `<span class="check ${sel ? 'on' : ''}"></span>` : ''}
       </div>`;
     }).join('');

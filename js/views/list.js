@@ -45,7 +45,7 @@ App.views.list = (function () {
         ${posterBlock(r.posterUrl)}
         <div class="body">
           <p class="name">${App.util.escapeHtml(r.title)}</p>
-          <div class="meta"><span>${App.util.movieDateLabel(r)}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? App.util.starsHtml(App.util.latestRating(r), 5) : ''}</div>
+          <div class="meta"><span>${App.util.dateShort(App.util.latestWatch(r)) || (App.util.entries(r).some(e => e.dateUnknown) ? '记不清了' : '')}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? `<span class="rate-num">${App.util.ratingText(App.util.latestRating(r))}</span>` : ''}</div>
         </div>
       </div>`;
     }).join('') + `</div>`;
@@ -59,7 +59,8 @@ App.views.list = (function () {
           const ck = c.querySelector('.check'); if (ck) ck.classList.toggle('on');
           updateListBatch();
         } else {
-          App.router.go('#/detail/' + c.dataset.id);
+          // 搜索状态下点结果 → 直接进入编辑（用户要搜到自己的电影并改时间等）；浏览状态下 → 进详情
+          App.router.go((state.query ? '#/edit/' : '#/detail/') + id);
         }
       };
     });
@@ -199,20 +200,8 @@ App.views.list = (function () {
       renderLibrary();
       return;
     }
-    if (!key) { renderLibrary(); return; }  // 没密钥：直接在本地库里按片名过滤
-    if (!key) {
-      const box = document.getElementById('searchResults');
-      box.classList.add('open');
-      box.innerHTML = `<div class="sr-head">搜索</div>
-        <div class="empty" style="padding:14px">开启「搜片名自动填资料」需要一个 TMDB 免费密钥。</div>
-        <div style="text-align:center;padding-bottom:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
-          <button class="btn primary" id="goSettings">去设置填密钥</button>
-          <button class="btn" id="manualFromSearch">手动添加《${App.util.escapeHtml(q)}》</button>
-        </div>`;
-      document.getElementById('goSettings').onclick = () => App.router.go('#/settings');
-      document.getElementById('manualFromSearch').onclick = () => App.router.go('#/edit?title=' + encodeURIComponent(q));
-      return;
-    }
+    if (!key) { renderLibrary(); return; }  // 没密钥：直接在本地库里按片名过滤（grid 已按 query 过滤）
+    renderLibrary(); // 有密钥时也同步过滤本地库，搜索结果里能直接点我的电影进去编辑
     const my = ++srSeq;
     App.tmdb.search(q, key)
       .then(list => {
@@ -249,6 +238,7 @@ App.views.list = (function () {
       </div>
       <div id="listBatchBar" class="fab-select" hidden>
         <span class="sel-count" id="listCount">已选 0 部</span>
+        <button class="btn primary fab-add" id="listBatchEdit">批量编辑</button>
         <button class="btn danger fab-add" id="listDel">删除</button>
       </div>`;
     renderFilters();
@@ -261,6 +251,8 @@ App.views.list = (function () {
     if (cancel) cancel.onclick = exitMulti;
     const del = document.getElementById('listDel');
     if (del) del.onclick = batchDelete;
+    const bedit = document.getElementById('listBatchEdit');
+    if (bedit) bedit.onclick = batchEdit;
     // 搜索（我的库里按片名过滤，有密钥则联机搜索 TMDB 可顺手加新片）
     const linput = document.getElementById('listSearch');
     if (linput) {
@@ -352,6 +344,78 @@ App.views.list = (function () {
         App.db.deleteRecord(dup[i++]).then(del);
       })();
     });
+  }
+
+  // 批量编辑：给选中的电影统一设置观影时间 / 评分 / 标签（留空的项不改变）
+  function batchEdit() {
+    const ids = [...state.selSet];
+    if (!ids.length) return;
+    const mask = document.createElement('div');
+    mask.className = 'modal-mask';
+    mask.innerHTML = `
+      <div class="modal">
+        <h3>批量编辑（${ids.length} 部）</h3>
+        <div class="muted" style="margin:-6px 0 12px">留空的项表示「不改」；填了就对选中电影统一生效。</div>
+        <div class="field"><label>统一观影时间（都记这一次）</label><input type="date" id="beDate"></div>
+        <label class="unk-toggle" style="margin-bottom:10px"><input type="checkbox" id="beUnknown"> 🤔 这些时间都记不清了</label>
+        <div class="field"><label>统一评分（可留空）</label><div class="stars" id="beStars"></div></div>
+        <div class="field"><label>统一加标签（多个用逗号分隔，可留空）</label><input type="text" id="beTags" placeholder="如：科幻,治愈"></div>
+        <div style="display:flex;gap:10px;margin-top:6px">
+          <button class="btn block" id="beCancel">取消</button>
+          <button class="btn primary block" id="beOk">保存修改</button>
+        </div>
+      </div>`;
+    document.body.appendChild(mask);
+    let rating = 0;
+    const starsBox = mask.querySelector('#beStars');
+    function paintStars() {
+      starsBox.innerHTML = [1,2,3,4,5].map(i => `<span class="s ${i <= rating ? 'on' : ''}" data-i="${i}">★</span>`).join('');
+      starsBox.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paintStars(); });
+    }
+    paintStars();
+    mask.querySelector('#beCancel').onclick = () => mask.remove();
+    mask.querySelector('#beOk').onclick = () => {
+      const date = mask.querySelector('#beDate').value;
+      const unknown = mask.querySelector('#beUnknown').checked;
+      const tagsRaw = mask.querySelector('#beTags').value.trim();
+      const addTags = tagsRaw ? tagsRaw.split(/[，,、]/).map(t => t.trim()).filter(Boolean) : [];
+      const setDate = !unknown && !!date;
+      if (!setDate && !rating && !addTags.length) { App.util.toast('至少填一项再保存'); return; }
+      App.util.toast('正在保存…');
+      Promise.all(ids.map(id => App.db.getRecord(id).then(r => {
+        if (!r) return;
+        // 统一时间：追加一条新观看（不覆盖原有）
+        if (setDate) {
+          const seq = (App.util.entries(r).length || 0) + 1;
+          r.entries = r.entries || [];
+          r.entries.push({ seq, watchDate: date, rating: rating || 0, review: '', comment: '', quotes: [], dateUnknown: false, dateNote: '' });
+        }
+        if (unknown) {
+          const seq = (App.util.entries(r).length || 0) + 1;
+          r.entries = r.entries || [];
+          r.entries.push({ seq, watchDate: '', rating: rating || 0, review: '', comment: '', quotes: [], dateUnknown: true, dateNote: '' });
+        }
+        if (rating) {
+          // 写入最新一条观看的评分
+          const es = App.util.entries(r);
+          if (es.length) es[es.length - 1].rating = rating;
+        }
+        if (addTags.length) {
+          const set = new Set(r.tags || []); addTags.forEach(t => set.add(t));
+          r.tags = [...set];
+        }
+        r.watchDates = App.util.watchDates(r).slice().sort();
+        r.rating = App.util.latestRating(r);
+        r.updatedAt = Date.now();
+        return App.db.saveRecord(r);
+      }))).then(() => {
+        mask.remove();
+        exitMulti();
+        return reload();
+      }).then(() => { renderFilters(); renderLibrary(); App.util.toast('已批量修改 ' + ids.length + ' 部 ✅'); App.audio.sfx('success'); })
+        .catch(() => App.util.toast('批量编辑失败，请重试'));
+    };
+    mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
   }
 
   // 长按电影卡片 → 进入多选模式并自动勾选（事件委托，容器只绑一次，避免泄漏）

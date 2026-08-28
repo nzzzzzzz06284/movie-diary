@@ -138,7 +138,7 @@ textarea{resize:vertical;line-height:1.6;}
 .disc-more .btn{margin:0 auto;}
 
 /* ===== 顶部栏 ===== */
-.app-header{background:linear-gradient(120deg,var(--blue),var(--primary));position:relative;overflow:hidden;padding:18px 20px 16px;}
+.app-header{background:linear-gradient(120deg,var(--blue),var(--primary));position:relative;overflow:hidden;padding:18px 20px 16px;padding-top:calc(16px + env(safe-area-inset-top));}
 .app-header::before{content:"";position:absolute;top:-60%;left:-20%;right:-20%;height:90%;background:radial-gradient(ellipse at 20% 0%,rgba(255,255,255,.22),transparent 55%);pointer-events:none;}
 .app-title{color:rgba(255,255,255,.96);font-size:19px;letter-spacing:2px;font-weight:700;position:relative;text-shadow:0 1px 3px rgba(0,0,0,.08);}
 #app .app-header{box-shadow:0 6px 20px rgba(63,157,149,.18);}
@@ -146,7 +146,7 @@ textarea{resize:vertical;line-height:1.6;}
 /* ===== FAB ===== */
 .fab{position:fixed;right:max(18px,calc(50% - 260px + 18px));bottom:84px;width:54px;height:54px;border-radius:50%;background:linear-gradient(135deg,var(--blue),var(--green));color:#fff;font-size:28px;line-height:1;box-shadow:var(--shadow-lg);z-index:30;display:flex;align-items:center;justify-content:center;padding:0;cursor:pointer;transition:transform .15s,box-shadow .15s;border:none;}
 .fab:active{transform:scale(.92);}
-.fab-assistant{bottom:162px;width:50px;height:50px;background:rgba(255,255,255,.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid var(--primary);color:var(--primary);font-size:0;box-shadow:var(--shadow-md);}
+.fab-assistant{bottom:162px;width:50px;height:50px;background:rgba(255,255,255,.72);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1.5px solid var(--primary);color:var(--primary);font-size:0;box-shadow:var(--shadow-md);touch-action:none;will-change:transform;}
 .fab-assistant svg{width:24px;height:24px;vertical-align:middle;}
 
 /* ===== Tabbar ===== */
@@ -162,6 +162,15 @@ textarea{resize:vertical;line-height:1.6;}
 .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:rgba(27,53,49,.92);color:#fff;padding:10px 18px;border-radius:999px;font-size:13.5px;z-index:60;max-width:80%;text-align:center;box-shadow:var(--shadow-lg);backdrop-filter:blur(6px);animation:fadeUp .2s ease;}
 .modal-mask{position:fixed;inset:0;background:rgba(27,53,49,.4);z-index:55;display:flex;align-items:flex-end;justify-content:center;animation:fadeIn .18s ease;}
 .modal{background:#fff;width:100%;max-width:520px;border-radius:22px 22px 0 0;padding:20px 18px 24px;max-height:86vh;overflow-y:auto;animation:slideup .26s cubic-bezier(.2,.8,.2,1);box-shadow:var(--shadow-lg);}
+
+/* ===== 键盘弹起时不挡任何输入框（弹窗/聊天窗/普通页全覆盖） ===== */
+/* kb-open 由 JS 在"输入框聚焦且检测到键盘高度>阈值"时挂到 body 上 */
+body.kb-open .modal-mask{align-items:flex-start;overflow-y:auto;-webkit-overflow-scrolling:touch;}
+body.kb-open .modal-mask{padding:10px 0 calc(10px + var(--kb,0px)) 0;}
+body.kb-open .modal{max-height:none;}
+body.kb-open .chat-win{height:calc(100vh - 96px - var(--kb,0px));}
+/* overlays 模式下视口不缩小，普通页（编辑/详情/设置等）需整体留出键盘高度，否则底部输入框被盖 */
+body.kb-open #app{padding-bottom:calc(74px + var(--kb,0px));}
 .modal h3{margin:0 0 14px;font-size:17px;}
 .modal .preview{display:flex;gap:12px;align-items:center;margin-bottom:14px;}
 .modal .preview img{width:70px;height:105px;object-fit:cover;border-radius:8px;background:var(--bg-soft);}
@@ -229,6 +238,14 @@ textarea{resize:vertical;line-height:1.6;}
 .cmt-send:active{transform:scale(.9);}
 .save-row{display:none;gap:10px;margin-top:8px;}
 .save-row.show{display:flex;}
+
+/* 编辑页：返回箭头 + 自动保存提示 */
+.edit-top{display:flex;align-items:center;gap:10px;margin:2px 0 14px;}
+.back-arrow{width:36px;height:36px;flex:none;border:none;background:var(--bg-soft);border-radius:50%;font-size:20px;color:var(--primary-deep);cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;}
+.back-arrow:active{transform:scale(.92);}
+.save-hint{text-align:center;font-size:12px;color:var(--muted);opacity:0;transition:opacity .3s;margin-top:8px;}
+/* 卡片上的数字评分（替代长串星星，不挤压文字） */
+.movie-card .rate-num{color:var(--star);font-weight:600;font-size:12.5px;}
 
 /* ===== 统计 ===== */
 .stat-cards{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:8px;}

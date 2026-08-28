@@ -105,6 +105,7 @@ App.tmdb = (function () {
       year: m.release_date ? m.release_date.slice(0, 4) : '',
       poster: poster(m.poster_path),
       overview: m.overview || '',
+      rating: m.vote_average || 0,
       genres: (m.genre_ids || []).map(id => String(id))
     };
   }

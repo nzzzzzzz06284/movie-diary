@@ -27,6 +27,22 @@ App.util = (function () {
     return `<span class="rate" style="--r:${pct.toFixed(1)}%"><span class="rb">★★★★★</span><span class="rf">★★★★★</span></span>`;
   }
 
+  // 数字评分（如 8.5）：卡片上替代长串星星，不挤压文字
+  function ratingText(rating) {
+    const r = Number(rating || 0);
+    if (!r) return '';
+    return r.toFixed(1);
+  }
+
+  // 短日期：2026-08-03 → 2026.8.3（去前导零），用于卡片紧凑展示
+  function dateShort(s) {
+    if (!s) return '';
+    const parts = String(s).split('-');
+    if (parts.length < 3) return s;
+    const y = parseInt(parts[0], 10), m = parseInt(parts[1], 10), d = parseInt(parts[2], 10);
+    return `${y}.${m}.${d}`;
+  }
+
   let toastTimer = null;
   function toast(msg) {
     const el = document.getElementById('toast');
@@ -249,7 +265,7 @@ App.util = (function () {
     return finish(rec);
   }
 
-  return { uid, today, fmtDate, escapeHtml, starsHtml, toast,
+  return { uid, today, fmtDate, escapeHtml, starsHtml, ratingText, dateShort, toast,
            compressImage, blobToDataURL, dataURLToBlob, exportAll, importAll,
            watchDates, latestWatch, firstWatch, watchCount,
            entries, entryBySeq, latestEntry, latestRating, entryLabel,
