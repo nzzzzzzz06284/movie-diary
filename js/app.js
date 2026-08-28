@@ -59,6 +59,29 @@ window.App = window.App || {};
       });
   }
 
+  // 键盘遮挡输入框：聚焦时把输入框顶进可见区；并监听软键盘高度变化重复调整
+  function fixKeyboard() {
+    const scrollActiveIntoView = () => {
+      const el = document.activeElement;
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
+        // 下一帧再滚，等键盘把视口压小后定位才准确
+        requestAnimationFrame(() => {
+          try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) { try { el.scrollIntoView(); } catch (e2) {} }
+        });
+      }
+    };
+    document.addEventListener('focusin', scrollActiveIntoView);
+    if (window.visualViewport) {
+      // 软键盘弹出/收起会让 visualViewport 高度变化，重新把输入框顶上来
+      let raf = null;
+      window.visualViewport.addEventListener('resize', () => {
+        if (raf) cancelAnimationFrame(raf);
+        raf = requestAnimationFrame(scrollActiveIntoView);
+      });
+    }
+  }
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
   else boot();
+  fixKeyboard();
 })();

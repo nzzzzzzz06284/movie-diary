@@ -32,22 +32,7 @@ App.views.discover = (function () {
     return state.records.some(r => (m.tmdbId && r.tmdbId === m.tmdbId)
       || (r.title || '').toLowerCase() === (m.title || '').toLowerCase());
   }
-  function makeRecord(seed, opts) {
-    const date = opts.date, unknown = opts.unknown;
-    return {
-      id: App.util.uid(),
-      watchDates: date ? [date] : [],
-      title: seed.title || '未命名',
-      posterUrl: seed.poster || '',
-      overview: seed.overview || '',
-      director: '', cast: [], rating: opts.rating || 0,
-      review: '', comment: '', tags: [], quotes: [],
-      tmdbId: seed.tmdbId || '', year: seed.year || '',
-      genres: seed.genres || [], castInfo: [],
-      entries: [{ seq: 1, watchDate: date, rating: opts.rating || 0, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? opts.note : '' }],
-      createdAt: Date.now(), updatedAt: Date.now()
-    };
-  }
+  function makeRecord(seed, opts) { return App.util.makeRecord(seed, opts); }
 
   function renderGrid() {
     const box = document.getElementById('discGrid');
@@ -118,17 +103,20 @@ App.views.discover = (function () {
   }
 
   function loadList(kind, page, append) {
-    if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
-    // 追加时若上一次还在飞，直接忽略，避免同一页被重复拉、page 被搞乱
-    if (append && state.loading) return;
-    const my = ++reqSeq;          // 本次请求编号
-    searchSeq++;                  // 让在飞的搜索结果作废，避免它盖掉筛选结果
-    state.loading = true;
-    if (!append) { state.query = ''; renderSkeleton(); }
-    const more = document.getElementById('discMore');
-    if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">加载中…</span>'; }
+    // 每次都读最新密钥：在「设置」里改了密钥后，不用重进页面也能生效
+    return App.db.getSettings().then(s => {
+      state.key = s.tmdbApiKey || '';
+      if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
+      // 追加时若上一次还在飞，直接忽略，避免同一页被重复拉、page 被搞乱
+      if (append && state.loading) return;
+      const my = ++reqSeq;          // 本次请求编号
+      searchSeq++;                  // 让在飞的搜索结果作废，避免它盖掉筛选结果
+      state.loading = true;
+      if (!append) { state.query = ''; renderSkeleton(); }
+      const more = document.getElementById('discMore');
+      if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">加载中…</span>'; }
 
-    App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page)
+      App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page)
       .then(data => {
         if (my !== reqSeq) return;       // 已有更新的请求，丢弃这份旧结果
         state.page = data.page; state.totalPages = data.totalPages;
@@ -167,6 +155,7 @@ App.views.discover = (function () {
           }
         }
       });
+    });
   }
 
   // 空/错误提示，可带重试按钮
@@ -185,27 +174,99 @@ App.views.discover = (function () {
     if (more) { more.style.display = ''; more.innerHTML = ''; }
   }
 
-  function doSearch(q) {
-    if (!q) { loadList(state.kind, 1, false); return; }
-    if (!state.key) { renderMsg('需要 TMDB 密钥才能搜索'); return; }
-    const my = ++searchSeq;
-    reqSeq++;                 // 让在飞的列表请求作废，别盖掉搜索结果
-    state.loading = false;    // 搜索不参与分页，避免把 loading 卡住导致后续都不响应
-    renderSkeleton();
-    const more = document.getElementById('discMore');
-    if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">搜索中…</span>'; }
-    App.tmdb.search(q, state.key).then(list => {
-      if (my !== searchSeq) return;
-      if (!list.length) { renderMsg('没找到「' + App.util.escapeHtml(q) + '」相关的电影'); return; }
-      state.movies = list;
-      state.page = 1; state.totalPages = 1;
-      resetWall();
-      renderGrid();
-      if (more) more.innerHTML = '';
-    }).catch(() => {
-      if (my !== searchSeq) return;
-      renderMsg('搜索没成功，网络不太稳', () => doSearch(q));
+  function closeDiscResults() {
+    const box = document.getElementById('discResults');
+    const bd = document.getElementById('discBackdrop');
+    if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+    if (bd) bd.hidden = true;
+  }
+
+  function renderDiscResults(list, q) {
+    const box = document.getElementById('discResults');
+    const bd = document.getElementById('discBackdrop');
+    if (!box) return;
+    if (!list) { closeDiscResults(); return; }
+    if (bd) bd.hidden = false;
+    box.classList.add('open');
+    const head = `<div class="sr-head">搜索结果 · 点「＋」直接加入</div>`;
+    if (!list.length) {
+      box.innerHTML = head + `<div class="empty" style="padding:14px">没找到「${App.util.escapeHtml(q)}」，可手动添加</div>`
+        + `<div style="text-align:center;padding-bottom:12px"><button class="btn primary sm" id="discManual">手动添加</button></div>`;
+      const mb = document.getElementById('discManual');
+      if (mb) mb.onclick = () => App.router.go('#/edit?title=' + encodeURIComponent(q));
+      return;
+    }
+    box.innerHTML = head + list.map(m => {
+      const added = inLibrary(m);
+      const over = m.overview ? (m.overview.length > 46 ? m.overview.slice(0, 46) + '…' : m.overview) : '暂无简介';
+      return `
+      <div class="result-row ${added ? 'added' : ''}" data-tmdb="${m.tmdbId}" data-title="${App.util.escapeHtml(m.title)}" data-year="${m.year}" data-poster="${App.util.escapeHtml(m.poster)}" data-over="${App.util.escapeHtml(m.overview)}">
+        ${m.poster ? `<img class="sr-poster" loading="lazy" src="${m.poster}" onerror="this.style.visibility='hidden'">` : `<div class="sr-poster ph">🎬</div>`}
+        <div class="sr-info">
+          <div class="sr-title">${App.util.escapeHtml(m.title)} <span class="sr-year">${m.year || ''}</span></div>
+          <div class="sr-over">${App.util.escapeHtml(over)}</div>
+        </div>
+        <button class="sr-add" data-act="add" aria-label="加入">${added ? '已加入' : '＋'}</button>
+      </div>`;
+    }).join('');
+    box.querySelectorAll('.result-row').forEach(r => {
+      // 右侧「＋」：一键入库
+      const addBtn = r.querySelector('.sr-add');
+      if (addBtn) addBtn.onclick = (e) => {
+        e.stopPropagation();
+        if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        const seed = { tmdbId: r.dataset.tmdb, title: r.dataset.title, poster: r.dataset.poster, year: r.dataset.year, overview: r.dataset.over };
+        App.util.addToLibrary({
+          tmdbId: seed.tmdbId, title: seed.title, poster: seed.poster, year: seed.year, overview: seed.overview,
+          alreadyInLibrary: () => inLibrary(seed), enrich: false
+        }).then(() => {
+          r.classList.add('added');
+          const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入';
+        });
+      };
+      // 点行身：进弹窗补全日期/评分（资料更全）
+      r.onclick = () => {
+        if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (App.views && App.views.list && App.views.list.quickAdd) {
+          App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over }, true);
+        }
+      };
     });
+  }
+
+  function doSearch(q) {
+    state.query = q || '';
+    if (!q) { closeDiscResults(); loadList(state.kind, 1, false); return; }
+    // 每次读最新密钥
+    return App.db.getSettings().then(s => {
+      state.key = s.tmdbApiKey || '';
+      if (!state.key) { renderDiscResultsMsg('需要 TMDB 密钥才能搜索'); return; }
+      const my = ++searchSeq;
+      reqSeq++;                 // 让在飞的列表请求作废，别盖掉搜索结果
+      state.loading = false;    // 搜索不参与分页，避免把 loading 卡住
+      const box = document.getElementById('discResults');
+      if (box) { box.classList.add('open'); box.innerHTML = `<div class="sr-head">搜索中…</div>`; }
+      const bd = document.getElementById('discBackdrop'); if (bd) bd.hidden = false;
+      App.tmdb.search(q, state.key).then(list => {
+        if (my !== searchSeq) return;
+        renderDiscResults(list, q);
+      }).catch(() => {
+        if (my !== searchSeq) return;
+        renderDiscResultsMsg('网络不太稳，没搜到，改几个字再试或手动添加', q);
+      });
+    });
+  }
+
+  function renderDiscResultsMsg(msg, q) {
+    const box = document.getElementById('discResults');
+    const bd = document.getElementById('discBackdrop');
+    if (!box) return;
+    if (bd) bd.hidden = false;
+    box.classList.add('open');
+    box.innerHTML = `<div class="sr-head">搜索</div><div class="empty" style="padding:14px">${msg}</div>`
+      + (q ? `<div style="text-align:center;padding-bottom:12px"><button class="btn primary sm" id="discManual2">手动添加《${App.util.escapeHtml(q)}》</button></div>` : '');
+    const mb = document.getElementById('discManual2');
+    if (mb) mb.onclick = () => App.router.go('#/edit?title=' + encodeURIComponent(q));
   }
 
   // 单个加入：弹窗填日期/评分，可 enrich 资料
@@ -641,9 +702,11 @@ App.views.discover = (function () {
       <div class="view-block search-wrap">
         <div class="search-bar">
           <span class="ico">🔍</span>
-          <input id="discSearch" type="text" placeholder="搜电影名…">
+          <input id="discSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜电影名…">
           <span class="search-clear" id="discClear" style="display:none">✕</span>
         </div>
+        <div class="disc-backdrop" id="discBackdrop" hidden></div>
+        <div class="search-results disc-results" id="discResults"></div>
       </div>
       <div class="gfx-hero" id="gfxHero">
         <div class="gfx-wall-wrap" id="gfxWallWrap"><div class="gfx-wall" id="gfxWall"></div></div>
@@ -692,7 +755,16 @@ App.views.discover = (function () {
       root.querySelector('#discClear').style.display = state.query ? 'block' : 'none';
       doSearch(state.query);
     }, 400);
-    root.querySelector('#discClear').onclick = () => { input.value = ''; state.query = ''; root.querySelector('#discClear').style.display = 'none'; loadList(state.kind, 1, false); };
+    input.onsearch = () => doSearch(input.value.trim());
+    input.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doSearch(input.value.trim()); } };
+    const bd = root.querySelector('#discBackdrop');
+    if (bd) bd.onclick = () => { closeDiscResults(); input.blur(); };
+    root.querySelector('#discClear').onclick = () => {
+      input.value = ''; state.query = '';
+      root.querySelector('#discClear').style.display = 'none';
+      closeDiscResults();
+      loadList(state.kind, 1, false);
+    };
     root.querySelector('#discMulti').onclick = () => { if (state.selecting) exitSelect(); else enterSelect(); };
     root.querySelector('#batchAdd').onclick = () => batchAdd();
     // 筛选栏：类型（含「全部」）/ 地区 / 年份

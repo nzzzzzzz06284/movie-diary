@@ -73,6 +73,7 @@ textarea{resize:vertical;line-height:1.6;}
 .search-bar .ico{color:var(--muted);}
 .search-bar input{border:none;outline:none;flex:1;font-size:14px;background:transparent;box-shadow:none;padding:0;}
 .search-bar input:focus{box-shadow:none;}
+.search-bar input[type=search]::-webkit-search-cancel-button,.search-bar input[type=search]::-webkit-search-decoration{display:none;}
 .search-clear{color:var(--muted);cursor:pointer;font-size:15px;}
 .search-results{position:absolute;left:14px;right:14px;z-index:40;display:none;margin-top:6px;background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-lg);padding:4px;max-height:60vh;overflow-y:auto;animation:fadeUp .2s ease;}
 .search-results.open{display:block;}
@@ -87,6 +88,12 @@ textarea{resize:vertical;line-height:1.6;}
 .sr-year{color:var(--muted);font-size:12px;font-weight:400;margin-left:5px;}
 .sr-over{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:2px;}
 .sr-action{color:var(--primary);font-size:19px;font-weight:700;flex:none;}
+.sr-add{flex:none;align-self:center;border:none;background:linear-gradient(135deg,var(--blue),var(--green));color:#fff;font-size:15px;font-weight:700;padding:6px 14px;border-radius:999px;box-shadow:0 3px 10px rgba(63,157,149,.25);}
+.sr-add:active{transform:scale(.94);}
+/* 电影库搜索下拉的遮罩与容器：下拉浮在网格上方，点遮罩收起 */
+.search-wrap{position:relative;}
+.disc-backdrop{position:absolute;left:0;right:0;top:54px;bottom:-2000px;background:rgba(27,53,49,.28);z-index:39;animation:fadeIn .15s ease;}
+.disc-results{top:54px;left:14px;right:14px;margin-top:6px;z-index:40;}
 .badge-done{font-size:11px;color:var(--muted);background:var(--bg-soft);padding:3px 8px;border-radius:999px;}
 
 /* ===== 电影网格与卡片 ===== */

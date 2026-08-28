@@ -195,9 +195,64 @@ App.util = (function () {
     return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
   }
 
+  // 由搜索结果 / 海报墙 / 卡片等构造一条观影记录（默认首刷日=今天，评分 0，可在 modal 里改）
+  function makeRecord(seed, opts) {
+    opts = opts || {};
+    const date = opts.date, unknown = opts.unknown, note = opts.note, rating = opts.rating || 0;
+    return {
+      id: uid(),
+      watchDates: date ? [date] : [],
+      title: seed.title || '未命名',
+      posterUrl: seed.poster || seed.posterUrl || '',
+      overview: seed.overview || '',
+      director: '', cast: [], castInfo: [], rating: rating,
+      review: '', comment: '', tags: [], quotes: [],
+      tmdbId: seed.tmdbId || '',
+      year: seed.year || '',
+      genres: seed.genres || [],
+      entries: [{ seq: 1, watchDate: date, rating: rating, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? note : '' }],
+      createdAt: Date.now(), updatedAt: Date.now()
+    };
+  }
+
+  // 一键入库（搜索下拉的「＋」按钮等）：直接保存 + 提示 + 音效，不弹 modal。
+  // opts: { tmdbId, title, poster, year, genres, overview, alreadyInLibrary(seed)->bool,
+  //         key, enrich, onDone(id), onAlready() }
+  function addToLibrary(opts) {
+    opts = opts || {};
+    const seed = { tmdbId: opts.tmdbId, title: opts.title, poster: opts.poster, year: opts.year, genres: opts.genres, overview: opts.overview };
+    if (typeof opts.alreadyInLibrary === 'function' && opts.alreadyInLibrary(seed)) {
+      toast('这部已在你的电影库');
+      if (opts.onAlready) opts.onAlready();
+      return Promise.resolve(null);
+    }
+    const rec = makeRecord(seed, { date: today(), unknown: false, rating: 0 });
+    const finish = (r) => {
+      const saved = (App.db && App.db.saveRecord) ? App.db.saveRecord(r) : Promise.reject(new Error('NO_DB'));
+      return saved.then(() => {
+        toast('已加入电影库 🎉');
+        if (App.audio && App.audio.sfx) App.audio.sfx('success');
+        if (opts.onDone) opts.onDone(r.id);
+        return r.id;
+      });
+    };
+    // 联网补全导演/演员（失败时也能正常入库）
+    if (opts.enrich && opts.tmdbId && opts.key) {
+      return App.tmdb.details(opts.tmdbId, opts.key)
+        .then(d => {
+          rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || [];
+          rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || [];
+          return finish(rec);
+        })
+        .catch(() => finish(rec));
+    }
+    return finish(rec);
+  }
+
   return { uid, today, fmtDate, escapeHtml, starsHtml, toast,
            compressImage, blobToDataURL, dataURLToBlob, exportAll, importAll,
            watchDates, latestWatch, firstWatch, watchCount,
            entries, entryBySeq, latestEntry, latestRating, entryLabel,
-           fmtEntryDate, movieDateLabel, eComments, eReason, fmtTime };
+           fmtEntryDate, movieDateLabel, eComments, eReason, fmtTime,
+           makeRecord, addToLibrary };
 })();

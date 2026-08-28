@@ -128,6 +128,8 @@ App.views.list = (function () {
   // 快速加入：选观影时间（首刷）+ 快速评分，点确定即入库
   function quickAdd(seed, enrich) {
     seed = seed || {};
+    // 包装成与下拉「＋」一致的字段（poster 兼容 posterUrl）
+    seed = Object.assign({}, seed, { poster: seed.poster || seed.posterUrl });
     const mask = document.createElement('div');
     mask.className = 'modal-mask';
     mask.innerHTML = `
@@ -187,7 +189,17 @@ App.views.list = (function () {
   }
 
   function doSearch(q) {
-    if (!q) { renderResults(null); return; }
+    if (!q) {
+      // 清空：收起下拉，恢复全部库列表
+      const box = document.getElementById('searchResults');
+      if (box) { box.classList.remove('open'); box.innerHTML = ''; }
+      const bd = document.getElementById('listBackdrop');
+      if (bd) bd.hidden = true;
+      state.query = '';
+      renderLibrary();
+      return;
+    }
+    if (!key) { renderLibrary(); return; }  // 没密钥：直接在本地库里按片名过滤
     if (!key) {
       const box = document.getElementById('searchResults');
       box.classList.add('open');
@@ -216,6 +228,15 @@ App.views.list = (function () {
 
   function render(param, root) {
     root.innerHTML = `
+      <div class="view-block search-wrap">
+        <div class="search-bar">
+          <span class="ico">🔍</span>
+          <input id="listSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜我库里的电影…">
+          <span class="search-clear" id="listClear" style="display:none">✕</span>
+        </div>
+        <div class="disc-backdrop" id="listBackdrop" hidden></div>
+        <div class="search-results disc-results" id="searchResults"></div>
+      </div>
       <div class="view-block">
         <div class="section-title">我的电影库 <span class="hint">${records.length} 部</span>
           <span class="ml-auto" style="display:flex;gap:8px;margin-left:auto">
@@ -240,6 +261,22 @@ App.views.list = (function () {
     if (cancel) cancel.onclick = exitMulti;
     const del = document.getElementById('listDel');
     if (del) del.onclick = batchDelete;
+    // 搜索（我的库里按片名过滤，有密钥则联机搜索 TMDB 可顺手加新片）
+    const linput = document.getElementById('listSearch');
+    if (linput) {
+      linput.oninput = debounce((e) => {
+        const q = e.target.value.trim();
+        state.query = q;
+        const cl = document.getElementById('listClear');
+        if (cl) cl.style.display = q ? 'block' : 'none';
+        doSearch(q);
+      }, 350);
+      linput.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); doSearch(linput.value.trim()); } };
+    }
+    const lbd = document.getElementById('listBackdrop');
+    if (lbd) lbd.onclick = () => { const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } lbd.hidden = true; };
+    const lcl = document.getElementById('listClear');
+    if (lcl) lcl.onclick = () => { const i = document.getElementById('listSearch'); if (i) i.value = ''; state.query = ''; lcl.style.display = 'none'; const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } if (lbd) lbd.hidden = true; renderLibrary(); };
     bindLongPressLibrary(root);
   }
 
@@ -357,5 +394,5 @@ App.views.list = (function () {
       .then(() => App.db.getSettings()).then(s => { key = s.tmdbApiKey || ''; });
   }
 
-  return { render, init, reload };
+  return { render, init, reload, quickAdd };
 })();
