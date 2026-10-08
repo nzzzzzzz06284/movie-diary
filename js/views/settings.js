@@ -45,12 +45,13 @@ App.views.settings = (function () {
           <div style="flex:1"><label>分支</label><input type="text" id="ghBranch" value="${App.util.escapeHtml(settings.ghBranch || 'main')}" placeholder="main"></div>
           <div style="flex:1"><label>文件名</label><input type="text" id="ghPath" value="${App.util.escapeHtml(settings.ghPath || 'movie-diary-data.json')}" placeholder="movie-diary-data.json"></div>
         </div>
+        <div class="field"><label>中转地址（默认留空；若「保存并测试」报网络错误，需填自建中继，见下方说明）</label><input type="text" id="ghProxy" value="${App.util.escapeHtml(settings.ghProxy || '')}" placeholder="https://你的中继.workers.dev"></div>
         <div style="display:flex;gap:8px">
           <button class="btn primary block" id="saveGh">保存并测试</button>
           <button class="btn block" id="ghRestore">从云端恢复</button>
         </div>
         <p class="muted" id="ghTestOut" style="margin-top:6px;white-space:pre-wrap;word-break:break-word"></p>
-        <p class="muted" style="margin-top:8px">数据每次变动自动存到这个<b>私有</b>仓库，清手机/换手机后重开 app 自动恢复，<b>不用手动导出</b>。建议：新建一个私有仓库专放数据；令牌用「Fine-grained PAT」只授权这一个仓库的 Contents 读写。令牌只存在你本机，不会上传。</p>
+        <p class="muted" style="margin-top:8px">数据每次变动自动存到这个<b>私有</b>仓库，清手机/换手机后重开 app 自动恢复，<b>不用手动导出</b>。令牌用<b>经典 PAT（ghp_ 开头）</b>最稳：GitHub → Settings → Developer settings → Personal access tokens (classic) → 勾 <b>repo</b> 生成。若「保存并测试」提示网络错误（你的网络拦截了浏览器直连 api.github.com），需按我发给你的说明自建一个<b>免费中继</b>并填进上方「中转地址」，即可解决。</p>
 
         <div class="section-title" style="margin-top:14px">📂 本地文件夹同步（仅桌面 Edge/Chrome）</div>
         <div id="syncStatus" class="muted" style="font-size:12px;margin-bottom:8px">未连接同步文件夹</div>
@@ -169,6 +170,7 @@ App.views.settings = (function () {
       settings.ghRepo = document.getElementById('ghRepo').value.trim();
       settings.ghBranch = document.getElementById('ghBranch').value.trim() || 'main';
       settings.ghPath = document.getElementById('ghPath').value.trim() || 'movie-diary-data.json';
+      settings.ghProxy = document.getElementById('ghProxy').value.trim();
       await App.db.saveSettings(settings);
       App.util.toast('已保存');
       const r = await App.sync.ghTest();
