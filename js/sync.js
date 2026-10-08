@@ -90,6 +90,28 @@ App.sync = (function () {
   // 读取并清洗配置：去掉复制粘贴带入的首尾空格/换行，避免 Authorization 头非法导致 fetch 抛「网络错误」
   function ghCreds(s) { return { token: (s.ghToken || '').trim(), repo: (s.ghRepo || '').trim(), branch: ghBranch(s), path: ghPath(s) }; }
 
+  // 公共 CORS 代理（直连被网络拦截时的中转；令牌放进 URL 避免预检 OPTIONS）
+  const PROXY_CANDIDATES = [
+    u => 'https://corsproxy.io/?url=' + encodeURIComponent(u),
+    u => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(u)
+  ];
+  // 先直连 GitHub；若被网络/CORS 预检拦截（fetch 抛错），依次走代理中转
+  async function ghFetch(url, opts, token) {
+    try {
+      const r = await fetch(url, Object.assign({}, opts, { headers: Object.assign({}, opts.headers) }));
+      return r; // 拿到任何响应（含 401/403/404）都算直连成功
+    } catch (e) { /* 直连被拦，试代理 */ }
+    const sep = url.includes('?') ? '&' : '?';
+    const urlTok = url + sep + 'access_token=' + encodeURIComponent(token);
+    for (const mk of PROXY_CANDIDATES) {
+      try {
+        const r = await fetch(mk(urlTok), Object.assign({}, opts, { headers: { Accept: 'application/vnd.github+json' } }));
+        return r;
+      } catch (e) { /* 试下一个代理 */ }
+    }
+    throw new Error('GitHub 请求在直连与所有代理下均失败');
+  }
+
   function utf8ToBase64(str) {
     const bytes = new TextEncoder().encode(str);
     let bin = '';
@@ -133,7 +155,7 @@ App.sync = (function () {
       // 取当前文件 sha（用于更新；404 表示首次创建）
       let sha = null;
       try {
-        const r = await fetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } });
+        const r = await ghFetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } }, g.token);
         if (r.ok) { const j = await r.json(); sha = j.sha; }
         else if (r.status !== 404) { lastError = '读取云端失败 ' + r.status; return; }
       } catch (e) { lastError = '网络错误（读取）'; return; }
@@ -141,12 +163,12 @@ App.sync = (function () {
       const body = { message: 'movie-diary auto sync', content, branch: ghBranch(s) };
       if (sha) body.sha = sha;
 
-      let r = await fetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) });
+      let r = await ghFetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) }, g.token);
       // 冲突（另一设备先推了）：重新取 sha 再试一次
       if (r.status === 409 && sha) {
         try {
-          const r2 = await fetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } });
-          if (r2.ok) { const j = await r2.json(); body.sha = j.sha; r = await fetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) }); }
+          const r2 = await ghFetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } }, g.token);
+          if (r2.ok) { const j = await r2.json(); body.sha = j.sha; r = await ghFetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) }, g.token); }
         } catch (e) { /* ignore */ }
       }
       if (r.ok) { lastPush = Date.now(); lastError = ''; }
@@ -195,8 +217,8 @@ App.sync = (function () {
     const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
     const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     let r;
-    try { r = await fetch(url, { headers }); }
-    catch (e) { App.util.toast('网络错误，拉取失败（确认在能打开 api.github.com 的同一浏览器里操作）'); return false; }
+    try { r = await ghFetch(url, { headers }, g.token); }
+    catch (e) { App.util.toast('网络错误，拉取失败（直连与代理都失败，确认 VPN 已开且能打开 api.github.com）'); return false; }
     if (!r.ok) {
       if (r.status === 404) App.util.toast('GitHub 上还没有备份，先在有数据的设备同步一次');
       else App.util.toast('拉取失败：' + r.status);
@@ -223,7 +245,7 @@ App.sync = (function () {
       const g = ghCreds(s);
       const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
       const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
-      const r = await fetch(url, { headers });
+      const r = await ghFetch(url, { headers }, g.token);
       if (!r.ok) return;
       const j = await r.json();
       const data = JSON.parse(base64ToUtf8(j.content));
@@ -235,6 +257,23 @@ App.sync = (function () {
     } catch (e) { console.warn('[sync] autoRestore failed', e); }
   }
 
+  // 诊断：区分「整个跨域 fetch 被挡」与「仅带 Authorization 头的预检被挡」
+  async function runNetDiag(g) {
+    const lines = [];
+    const probe = async (label, url, opts) => {
+      try {
+        const r = await fetch(url, opts);
+        return label + ' → HTTP ' + r.status + '（拿到响应，网络通）';
+      } catch (e) {
+        return label + ' → 失败 ' + (e && e.name ? e.name : 'Error') + ': ' + (e && e.message ? e.message : e);
+      }
+    };
+    lines.push(await probe('① 无头GET rate_limit', 'https://api.github.com/rate_limit'));
+    lines.push(await probe('② 带Authorization头', 'https://api.github.com/repos/' + encodeURIComponent(g.repo), { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } }));
+    lines.push(await probe('③ 用?access_token=参数', 'https://api.github.com/repos/' + encodeURIComponent(g.repo) + '?access_token=' + encodeURIComponent(g.token)));
+    return lines.join('\n');
+  }
+
   async function ghTest() {
     const s = await App.db.getSettings();
     if (!ghEnabled(s)) return '请先填写令牌和仓库';
@@ -242,8 +281,8 @@ App.sync = (function () {
     const base = 'https://api.github.com/repos/' + encodeURIComponent(g.repo);
     const authHeaders = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     try {
-      // 直接用令牌测试（Authorization 是 CORS 安全头，不会触发预检）；并捕获 GitHub 返回的真实原因
-      const r = await fetch(base, { headers: authHeaders });
+      // 先用令牌直连；失败自动走公共代理中转
+      const r = await ghFetch(base, { headers: authHeaders }, g.token);
       if (r.ok) {
         const j = await r.json();
         return '✅ 连接成功：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）');
@@ -257,7 +296,10 @@ App.sync = (function () {
     } catch (e) {
       console.error('[sync] ghTest fetch failed', e);
       const detail = (e && e.name && e.message) ? (e.name + ': ' + e.message) : ('' + e);
-      return '❌ 网络错误：' + detail + '（请确认在能打开 api.github.com 的同一浏览器/窗口里操作，且 VPN 已开）';
+      let out = '❌ 网络错误：直连与代理都失败。\n── 网络诊断 ──\n';
+      try { out += await runNetDiag(g); } catch (_) {}
+      out += '\n结论：你的网络拦截了浏览器对 api.github.com 的跨域请求（国内网络常见）。需在能打开 api.github.com 的浏览器里、且走 VPN 时操作；若仍不行，改用中转服务（我帮你配置）。';
+      return out;
     }
   }
 
