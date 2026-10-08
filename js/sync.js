@@ -240,25 +240,24 @@ App.sync = (function () {
     if (!ghEnabled(s)) return '请先填写令牌和仓库';
     const g = ghCreds(s);
     const base = 'https://api.github.com/repos/' + encodeURIComponent(g.repo);
+    const authHeaders = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     try {
-      // 先发一个「简单请求」（不带 Authorization，避免触发 CORS 预检），能通说明网络层没问题
-      let r = await fetch(base, { headers: { Accept: 'application/json' } });
-      if (!r) throw new Error('无法连接 api.github.com');
-      if (r.ok) { const j = await r.json(); return '✅ 连接成功：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）'); }
-      if (r.status === 404) return '❌ 找不到仓库，检查「仓库」格式是否为 用户名/仓库名（且仓库已创建）';
-      if (r.status === 401) {
-        // 私有仓库：再用令牌试一次（这一步会触发 CORS 预检）
-        const r2 = await fetch(base, { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } });
-        if (r2.ok) { const j = await r2.json(); return '✅ 连接成功：' + j.full_name + '（私有）'; }
-        if (r2.status === 401) return '❌ 令牌无效或无权限（检查令牌是否正确、是否授权该仓库 Contents 读写）';
-        if (r2.status === 404) return '❌ 找不到仓库，检查「仓库」格式是否为 用户名/仓库名';
-        return '❌ 错误 ' + r2.status;
+      // 直接用令牌测试（Authorization 是 CORS 安全头，不会触发预检）；并捕获 GitHub 返回的真实原因
+      const r = await fetch(base, { headers: authHeaders });
+      if (r.ok) {
+        const j = await r.json();
+        return '✅ 连接成功：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）');
       }
-      return '❌ 错误 ' + r.status;
+      let msg = '';
+      try { const b = await r.json(); if (b && b.message) msg = b.message; } catch (e) {}
+      if (r.status === 401) return '❌ 令牌无效：' + (msg || 'GitHub 拒绝了这个令牌') + '（请重新复制整串 ghp_… / github_pat_… 并粘贴进 app）';
+      if (r.status === 403) return '❌ 权限不足(403)：' + (msg || '令牌没有该仓库的权限') + '｜经典令牌需勾 repo；Fine-grained 需在 Contents 设 Read and write 并重新生成';
+      if (r.status === 404) return '❌ 找不到仓库(404)：检查「仓库」是否为 用户名/仓库名、仓库是否已创建、且令牌与仓库同账号';
+      return '❌ 错误 ' + r.status + (msg ? '：' + msg : '');
     } catch (e) {
       console.error('[sync] ghTest fetch failed', e);
       const detail = (e && e.name && e.message) ? (e.name + ': ' + e.message) : ('' + e);
-      return '❌ 网络错误：' + detail + '（多为连不上 api.github.com / 被代理或独立 PWA 没走 VPN；请确认在能打开 api.github.com 的同一浏览器里操作）';
+      return '❌ 网络错误：' + detail + '（请确认在能打开 api.github.com 的同一浏览器/窗口里操作，且 VPN 已开）';
     }
   }
 
