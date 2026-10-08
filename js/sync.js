@@ -10,12 +10,36 @@ App.sync = (function () {
   let lastPush = 0;         // 上次云端推送时间
   let lastError = '';       // 上次云端错误
 
+  // 从扫码链接自动配置 GitHub 同步（避免手动复制长串令牌出错）：?synctoken=xxx&syncrepo=用户名/仓库
+  async function applySyncFromUrl() {
+    try {
+      const p = new URLSearchParams(location.search);
+      const t = (p.get('synctoken') || '').trim();
+      const r = (p.get('syncrepo') || '').trim();
+      if (!t || !r) return;
+      const s = await App.db.getSettings();
+      s.ghToken = t; s.ghRepo = r;
+      if (!s.ghBranch) s.ghBranch = 'main';
+      if (!s.ghPath) s.ghPath = 'movie-diary-data.json';
+      await App.db.saveSettings(s);
+      // 清掉 URL 里的令牌，避免泄露与重复触发
+      try { history.replaceState({}, '', location.pathname + (location.hash || '')); } catch (e) {}
+      App.util.toast('已从扫码链接自动配置同步，正在连接测试…');
+      setTimeout(async () => {
+        const msg = await ghTest();
+        App.util.toast((msg || '').split('\n')[0]);
+        if ((msg || '').indexOf('✅') === 0) App.sync.push();
+      }, 1000);
+    } catch (e) { console.warn('[sync] applySyncFromUrl failed', e); }
+  }
+
   // ===================== 本地文件夹（桌面） =====================
   function supported() {
     return typeof window.showDirectoryPicker === 'function';
   }
 
   async function init() {
+    await applySyncFromUrl();
     if (supported()) {
       try {
         const rec = await App.db.getKV('syncDir');
