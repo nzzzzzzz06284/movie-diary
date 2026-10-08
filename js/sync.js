@@ -84,9 +84,11 @@ App.sync = (function () {
   }
 
   // ===================== GitHub 云端同步（全平台含手机） =====================
-  function ghEnabled(s) { return !!(s && s.ghToken && s.ghRepo); }
-  function ghPath(s) { return (s && s.ghPath) || 'movie-diary-data.json'; }
-  function ghBranch(s) { return (s && s.ghBranch) || 'main'; }
+  function ghEnabled(s) { return !!(s && s.ghToken && s.ghToken.trim() && s.ghRepo && s.ghRepo.trim()); }
+  function ghPath(s) { return ((s && s.ghPath) || 'movie-diary-data.json').trim() || 'movie-diary-data.json'; }
+  function ghBranch(s) { return ((s && s.ghBranch) || 'main').trim() || 'main'; }
+  // 读取并清洗配置：去掉复制粘贴带入的首尾空格/换行，避免 Authorization 头非法导致 fetch 抛「网络错误」
+  function ghCreds(s) { return { token: (s.ghToken || '').trim(), repo: (s.ghRepo || '').trim(), branch: ghBranch(s), path: ghPath(s) }; }
 
   function utf8ToBase64(str) {
     const bytes = new TextEncoder().encode(str);
@@ -119,13 +121,14 @@ App.sync = (function () {
   async function cloudPush() {
     const s = await App.db.getSettings();
     if (!ghEnabled(s)) return;
+    const g = ghCreds(s);
     if (cloudBusy) { cloudPending = true; return; }
     cloudBusy = true;
     try {
       const payload = await buildPayload();
       const content = utf8ToBase64(JSON.stringify(payload));
-      const url = `https://api.github.com/repos/${encodeURIComponent(s.ghRepo)}/contents/${encodeURIComponent(ghPath(s))}?ref=${encodeURIComponent(ghBranch(s))}`;
-      const headers = { Authorization: 'Bearer ' + s.ghToken, Accept: 'application/vnd.github+json' };
+      const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+      const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
 
       // 取当前文件 sha（用于更新；404 表示首次创建）
       let sha = null;
@@ -188,11 +191,12 @@ App.sync = (function () {
   async function cloudPull() {
     const s = await App.db.getSettings();
     if (!ghEnabled(s)) { App.util.toast('请先在设置里配置 GitHub 同步'); return false; }
-    const url = `https://api.github.com/repos/${encodeURIComponent(s.ghRepo)}/contents/${encodeURIComponent(ghPath(s))}?ref=${encodeURIComponent(ghBranch(s))}`;
-    const headers = { Authorization: 'Bearer ' + s.ghToken, Accept: 'application/vnd.github+json' };
+    const g = ghCreds(s);
+    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+    const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     let r;
     try { r = await fetch(url, { headers }); }
-    catch (e) { App.util.toast('网络错误，拉取失败'); return false; }
+    catch (e) { App.util.toast('网络错误，拉取失败（确认在能打开 api.github.com 的同一浏览器里操作）'); return false; }
     if (!r.ok) {
       if (r.status === 404) App.util.toast('GitHub 上还没有备份，先在有数据的设备同步一次');
       else App.util.toast('拉取失败：' + r.status);
@@ -216,8 +220,9 @@ App.sync = (function () {
       if (!ghEnabled(s)) return;
       const local = await App.db.getRecords();
       if (local.length) return; // 本机有数据就不覆盖
-      const url = `https://api.github.com/repos/${encodeURIComponent(s.ghRepo)}/contents/${encodeURIComponent(ghPath(s))}?ref=${encodeURIComponent(ghBranch(s))}`;
-      const headers = { Authorization: 'Bearer ' + s.ghToken, Accept: 'application/vnd.github+json' };
+      const g = ghCreds(s);
+      const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+      const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
       const r = await fetch(url, { headers });
       if (!r.ok) return;
       const j = await r.json();
@@ -233,15 +238,28 @@ App.sync = (function () {
   async function ghTest() {
     const s = await App.db.getSettings();
     if (!ghEnabled(s)) return '请先填写令牌和仓库';
+    const g = ghCreds(s);
+    const base = 'https://api.github.com/repos/' + encodeURIComponent(g.repo);
     try {
-      const r = await fetch('https://api.github.com/repos/' + encodeURIComponent(s.ghRepo), {
-        headers: { Authorization: 'Bearer ' + s.ghToken, Accept: 'application/vnd.github+json' }
-      });
+      // 先发一个「简单请求」（不带 Authorization，避免触发 CORS 预检），能通说明网络层没问题
+      let r = await fetch(base, { headers: { Accept: 'application/json' } });
+      if (!r) throw new Error('无法连接 api.github.com');
       if (r.ok) { const j = await r.json(); return '✅ 连接成功：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）'); }
-      if (r.status === 401) return '❌ 令牌无效或无权限（检查令牌是否正确、是否授权该仓库）';
-      if (r.status === 404) return '❌ 找不到仓库，检查「仓库」格式是否为 用户名/仓库名';
+      if (r.status === 404) return '❌ 找不到仓库，检查「仓库」格式是否为 用户名/仓库名（且仓库已创建）';
+      if (r.status === 401) {
+        // 私有仓库：再用令牌试一次（这一步会触发 CORS 预检）
+        const r2 = await fetch(base, { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } });
+        if (r2.ok) { const j = await r2.json(); return '✅ 连接成功：' + j.full_name + '（私有）'; }
+        if (r2.status === 401) return '❌ 令牌无效或无权限（检查令牌是否正确、是否授权该仓库 Contents 读写）';
+        if (r2.status === 404) return '❌ 找不到仓库，检查「仓库」格式是否为 用户名/仓库名';
+        return '❌ 错误 ' + r2.status;
+      }
       return '❌ 错误 ' + r.status;
-    } catch (e) { return '❌ 网络错误：' + (e && e.message || e); }
+    } catch (e) {
+      console.error('[sync] ghTest fetch failed', e);
+      const detail = (e && e.name && e.message) ? (e.name + ': ' + e.message) : ('' + e);
+      return '❌ 网络错误：' + detail + '（多为连不上 api.github.com / 被代理或独立 PWA 没走 VPN；请确认在能打开 api.github.com 的同一浏览器里操作）';
+    }
   }
 
   async function ghStatus() {
