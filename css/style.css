@@ -471,3 +471,30 @@ body.dark-view .fab-assistant{background:rgba(255,255,255,.82);border-color:var(
 @keyframes skShine{from{background-position:120% 0;}to{background-position:-120% 0;}}
 .disc-retry{margin-top:10px;padding:8px 18px;border-radius:999px;border:1px solid var(--primary);background:transparent;color:var(--primary-deep);font-size:13px;cursor:pointer;}
 .disc-retry:active{transform:scale(.96);}
+
+/* ===== 电影 / 剧集 切换（发现页左上角） ===== */
+.media-toggle{display:flex;gap:6px;margin-bottom:10px;}
+.mt-btn{flex:1;border:1px solid var(--border);background:var(--surface);color:var(--muted);border-radius:12px;padding:9px 0;font-size:14px;font-weight:600;cursor:pointer;transition:all .2s;display:flex;align-items:center;justify-content:center;gap:5px;}
+.mt-btn.active{background:var(--primary);border-color:transparent;color:#fff;box-shadow:var(--shadow-sm);}
+.mt-btn:active{transform:scale(.97);}
+
+/* 我的电影库：全部 / 电影 / 剧集 筛选条 */
+.media-seg{margin-bottom:10px;}
+
+/* 卡片上的剧集标识与看完角标 */
+.movie-card{position:relative;}
+.tv-badge{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--primary-deep);background:var(--primary-soft);border-radius:999px;padding:1px 8px;font-weight:600;}
+.media-tag{display:inline-flex;align-items:center;gap:3px;font-size:12px;color:var(--primary-deep);background:var(--primary-soft);border-radius:999px;padding:1px 8px;font-weight:600;margin-top:2px;}
+.badge.done-badge{position:absolute;top:6px;left:6px;background:rgba(78,163,156,.94);color:#fff;font-size:11px;font-weight:700;border-radius:999px;padding:2px 7px;z-index:3;box-shadow:0 2px 6px rgba(0,0,0,.18);}
+
+/* 剧集进度：季/集步进器（加入弹窗 + 编辑页共用） */
+.tv-add,.tv-edit-box{background:var(--primary-soft);border-radius:12px;padding:11px 12px;border:1px solid rgba(78,163,156,.18);}
+.stepper-row{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-size:14px;color:var(--text);}
+.stp{width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:var(--surface);color:var(--primary-deep);font-size:17px;font-weight:700;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:transform .12s,background .15s;}
+.stp:active{transform:scale(.92);background:var(--primary-soft);}
+.stp-val{min-width:18px;text-align:center;font-weight:700;font-size:15px;}
+.tv-info{font-size:12.5px;color:var(--primary-deep);margin-top:8px;font-weight:600;}
+
+/* 详情页：观剧进度 + 海报上的看完角标 */
+.tv-progress{font-size:13px;color:var(--primary-deep);background:var(--primary-soft);display:inline-block;padding:2px 10px;border-radius:999px;margin-top:4px;font-weight:600;}
+.detail-hero .poster{position:relative;}

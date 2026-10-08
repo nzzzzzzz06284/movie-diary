@@ -33,12 +33,14 @@ App.views.detail = (function () {
     const sorted = es.slice().sort((a, b) => (a.watchDate || '9999').localeCompare(b.watchDate || '9999'));
     const count = es.length;
     const recentLabel = App.util.movieDateLabel(rec);
+    const tvLine = App.util.tvLabel(rec);
+    const doneBadge = App.util.tvCompleted(rec) ? '<span class="badge done-badge">✅已看完</span>' : '';
     const watchChips = sorted.map(e =>
       `<span class="chip watch-chip ${e.seq === curSeq ? 'active' : ''}" data-seq="${e.seq}">${App.util.entryLabel(e.seq)} · ${App.util.fmtEntryDate(e)}</span>`).join('')
       + `<span class="chip add" id="rewatchBtn">🔁 又看一遍</span>`;
     return `
       <div class="detail-hero">
-        <div class="poster ${rec.posterUrl ? '' : 'ph'}">${poster}</div>
+        <div class="poster ${rec.posterUrl ? '' : 'ph'}">${poster}${doneBadge}</div>
         <div class="hero-actions">
           <button class="btn sm" id="editBtn" title="编辑资料">✏️</button>
           <button class="btn sm danger" id="delBtn" title="删除">🗑</button>
@@ -47,6 +49,7 @@ App.views.detail = (function () {
           <h2>${App.util.escapeHtml(rec.title)}</h2>
           <div class="date">${recentLabel}${count > 1 ? ' · 看了' + count + '次' : ''}</div>
           ${App.util.latestRating(rec) ? '<div>' + App.util.starsHtml(App.util.latestRating(rec), 5) + '</div>' : ''}
+          ${tvLine ? `<div class="tv-progress">${App.util.escapeHtml(tvLine)}</div>` : ''}
           ${tagHtml}
           ${meta ? `<div class="meta-line">${App.util.escapeHtml(meta)}</div>` : ''}
           ${rec.overview && rec.overview.trim() ? `<div class="ov-wrap" id="ovWrap"><div class="ov-txt">${App.util.escapeHtml(rec.overview)}</div><span class="ov-more" id="ovMore">展开</span></div>` : ''}

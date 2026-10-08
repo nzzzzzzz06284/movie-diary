@@ -226,6 +226,8 @@ App.util = (function () {
       tmdbId: seed.tmdbId || '',
       year: seed.year || '',
       genres: seed.genres || [],
+      mediaType: opts.mediaType || 'movie',
+      tv: opts.tv || null,
       entries: [{ seq: 1, watchDate: date, rating: rating, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? note : '' }],
       createdAt: Date.now(), updatedAt: Date.now()
     };
@@ -242,7 +244,7 @@ App.util = (function () {
       if (opts.onAlready) opts.onAlready();
       return Promise.resolve(null);
     }
-    const rec = makeRecord(seed, { date: today(), unknown: false, rating: 0 });
+    const rec = makeRecord(seed, { date: today(), unknown: false, rating: 0, mediaType: opts.mediaType, tv: opts.tv });
     const finish = (r) => {
       const saved = (App.db && App.db.saveRecord) ? App.db.saveRecord(r) : Promise.reject(new Error('NO_DB'));
       return saved.then(() => {
@@ -265,10 +267,39 @@ App.util = (function () {
     return finish(rec);
   }
 
+  // 剧集进度辅助：返回某季的集数（优先用 seasons 明细，否则用全剧总集数）
+  function tvSeasonEpisodes(rec) {
+    const t = (rec && rec.tv) || {};
+    if (t.seasons && t.seasons.length) {
+      const f = t.seasons.find(x => x.s === (t.season || 1));
+      if (f && f.n) return f.n;
+    }
+    return t.totalEpisodes || 0;
+  }
+  // 详情页整句进度（如「📺 看到 第1季 第5集 / 共12集 · ✅已看完」）
+  function tvLabel(rec) {
+    if (!rec || rec.mediaType !== 'tv' || !rec.tv) return '';
+    const t = rec.tv, s = t.season || 1, e = t.episode || 0;
+    const max = tvSeasonEpisodes(rec);
+    let out = '📺 看到 第' + s + '季 第' + e + '集';
+    if (max) out += ' / 共' + max + '集';
+    if (t.completed) out += ' · ✅已看完';
+    return out;
+  }
+  // 列表卡片紧凑标识：📺 S1E5；未开始则 📺 想看
+  function tvCardMeta(rec) {
+    if (!rec || rec.mediaType !== 'tv' || !rec.tv) return '';
+    const t = rec.tv, s = t.season || 1, e = t.episode || 0;
+    return e ? ('📺 S' + s + 'E' + e) : '📺 想看';
+  }
+  function tvCompleted(rec) { return !!(rec && rec.mediaType === 'tv' && rec.tv && rec.tv.completed); }
+  function isTv(rec) { return !!(rec && rec.mediaType === 'tv'); }
+
   return { uid, today, fmtDate, escapeHtml, starsHtml, ratingText, dateShort, toast,
            compressImage, blobToDataURL, dataURLToBlob, exportAll, importAll,
            watchDates, latestWatch, firstWatch, watchCount,
            entries, entryBySeq, latestEntry, latestRating, entryLabel,
            fmtEntryDate, movieDateLabel, eComments, eReason, fmtTime,
-           makeRecord, addToLibrary };
+           makeRecord, addToLibrary,
+           tvSeasonEpisodes, tvLabel, tvCardMeta, tvCompleted, isTv };
 })();

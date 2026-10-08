@@ -3,7 +3,7 @@ window.App = window.App || {};
 App.views = App.views || {};
 
 App.views.list = (function () {
-  let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set() };
+  let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set(), media: 'all' };
   let records = [];
   let key = '';
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
@@ -22,6 +22,7 @@ App.views.list = (function () {
     const box = document.getElementById('library');
     if (!box) return;
     let list = records.slice();
+    if (state.media !== 'all') list = list.filter(r => (r.mediaType || 'movie') === state.media);
     if (state.query) {
       const q = state.query.toLowerCase();
       list = list.filter(r => (r.title || '').toLowerCase().includes(q)
@@ -33,19 +34,26 @@ App.views.list = (function () {
     if (state.tags.size) list = list.filter(r => (r.tags || []).some(t => state.tags.has(t)));
 
     if (!list.length) {
-      box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query || state.tags.size || state.year ? '没有匹配的电影' : '还没有电影，去搜索或点右下角 ＋ 添加'}</div>`;
+      const base = state.query || state.tags.size || state.year || state.media !== 'all';
+      box.innerHTML = `<div class="empty"><div class="big">${state.media === 'tv' ? '📺' : '🎞️'}</div>${base ? '没有匹配的' + (state.media === 'tv' ? '剧集' : '电影') : '还没有电影，去搜索或点右下角 ＋ 添加'}</div>`;
       return;
     }
     const sel = state.selSet;
     box.innerHTML = `<div class="movie-grid ${state.selecting ? 'selecting' : ''}">` + list.map(r => {
       const isSel = sel.has(r.id);
+      const tvMeta = App.util.tvCardMeta(r);          // 📺 S1E5 / 📺 想看
+      const done = App.util.tvCompleted(r);           // ✅ 已看完
+      const mediaTag = (r.mediaType || 'movie') === 'tv' ? '<span class="media-tag tv">📺剧集</span>' : '';
       return `
       <div class="movie-card ${state.selecting ? 'selectable' : ''} ${isSel ? 'sel' : ''}" data-id="${r.id}">
         ${state.selecting ? '<span class="check ' + (isSel ? 'on' : '') + '"></span>' : ''}
+        ${done ? '<span class="badge done-badge">✅已看完</span>' : ''}
         ${posterBlock(r.posterUrl)}
         <div class="body">
           <p class="name">${App.util.escapeHtml(r.title)}</p>
           <div class="meta"><span>${App.util.dateShort(App.util.latestWatch(r)) || (App.util.entries(r).some(e => e.dateUnknown) ? '记不清了' : '')}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? `<span class="rate-num">${App.util.ratingText(App.util.latestRating(r))}</span>` : ''}</div>
+          ${tvMeta ? `<div class="meta"><span class="tv-badge">${tvMeta}</span></div>` : ''}
+          ${mediaTag ? `<div class="meta">${mediaTag}</div>` : ''}
         </div>
       </div>`;
     }).join('') + `</div>`;
@@ -64,6 +72,8 @@ App.views.list = (function () {
         }
       };
     });
+    const cnt = document.getElementById('listCountHint');
+    if (cnt) cnt.textContent = list.length + ' 部';
   }
 
   function renderFilters() {
@@ -131,22 +141,32 @@ App.views.list = (function () {
     seed = seed || {};
     // 包装成与下拉「＋」一致的字段（poster 兼容 posterUrl）
     seed = Object.assign({}, seed, { poster: seed.poster || seed.posterUrl });
+    const isTv = seed.mediaType === 'tv' || (seed.tv && typeof seed.tv === 'object');
     const mask = document.createElement('div');
     mask.className = 'modal-mask';
     mask.innerHTML = `
       <div class="modal">
-        <h3>加入电影库</h3>
+        <h3>加入${isTv ? '剧集库' : '电影库'}</h3>
         <div class="preview">
-          ${seed.posterUrl ? `<img src="${seed.posterUrl}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">🎬</div>`}
+          ${seed.posterUrl ? `<img src="${seed.posterUrl}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">${isTv ? '📺' : '🎬'}</div>`}
           <div><div style="font-weight:600">${App.util.escapeHtml(seed.title || '')}</div><div class="muted">${seed.year || ''}</div></div>
         </div>
         <div class="field"><label>观影时间（首刷）</label><input type="date" id="qaDate" value="${App.util.today()}"></div>
         <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 🤔 记不清具体哪天了</label>
         <div class="field" id="qaNoteWrap" style="display:none;margin-top:8px"><label>大概什么时候？（选填，如 2020 / 大学时）</label><input type="text" id="qaNote" placeholder="可留空"></div>
+        ${isTv ? `
+        <div class="field tv-add">
+          <label>看到第几集（可留空，稍后在详情补）</label>
+          <div class="stepper-row">
+            <span>第</span><button type="button" class="stp" id="qaSMinus">−</button><span class="stp-val" id="qaS">1</span><button type="button" class="stp" id="qaSPlus">＋</button>
+            <span>季 · 第</span><button type="button" class="stp" id="qaEMinus">−</button><span class="stp-val" id="qaE">0</span><button type="button" class="stp" id="qaEPlus">＋</button><span>集</span>
+          </div>
+          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> ✅ 已经看完</label>
+        </div>` : ''}
         <div class="field"><label>快速评分（可留空，进详情再评）</label><div class="stars" id="qaStars"></div></div>
         <div style="display:flex;gap:10px;margin-top:6px">
           <button class="btn block" id="qaCancel">取消</button>
-          <button class="btn primary block" id="qaOk">加入电影库</button>
+          <button class="btn primary block" id="qaOk">加入${isTv ? '剧集库' : '电影库'}</button>
         </div>
       </div>`;
     document.body.appendChild(mask);
@@ -157,6 +177,14 @@ App.views.list = (function () {
       starsBox.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paintStars(); });
     }
     paintStars();
+    if (isTv) {
+      const qaS = mask.querySelector('#qaS'), qaE = mask.querySelector('#qaE');
+      const stepN = (el, d, min) => { let v = parseInt(el.textContent, 10) + d; if (v < min) v = min; el.textContent = v; };
+      mask.querySelector('#qaSMinus').onclick = () => stepN(qaS, -1, 1);
+      mask.querySelector('#qaSPlus').onclick = () => stepN(qaS, 1, 1);
+      mask.querySelector('#qaEMinus').onclick = () => stepN(qaE, -1, 0);
+      mask.querySelector('#qaEPlus').onclick = () => stepN(qaE, 1, 0);
+    }
     const qaUnk = mask.querySelector('#qaUnknown');
     const qaNoteWrap = mask.querySelector('#qaNoteWrap');
     const qaDate = mask.querySelector('#qaDate');
@@ -175,15 +203,24 @@ App.views.list = (function () {
         director: '', cast: [], castInfo: [], rating: rating || 0,
         review: '', comment: '', tags: [], quotes: [],
         tmdbId: seed.tmdbId || '',
+        mediaType: isTv ? 'tv' : 'movie',
+        tv: isTv ? { season: 1, episode: 0, completed: false, totalEpisodes: 0, totalSeasons: 0, seasons: [] } : null,
         entries: [{ seq: 1, watchDate: date, rating: rating || 0, review: '', comment: '', quotes: [], dateUnknown: unknown, dateNote: unknown ? note : '' }],
         createdAt: Date.now(), updatedAt: Date.now()
       };
-      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入电影库 🎉'); App.audio.sfx('success'); App.router.go('#/detail/' + r.id); });
+      if (isTv) {
+        const s = mask.querySelector('#qaS'), e = mask.querySelector('#qaE'), done = mask.querySelector('#qaDone');
+        rec.tv = { season: parseInt(s.textContent, 10) || 1, episode: parseInt(e.textContent, 10) || 0, completed: !!(done && done.checked), totalEpisodes: 0, totalSeasons: 0, seasons: [] };
+      }
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入' + (isTv ? '剧集库' : '电影库') + ' 🎉'); App.audio.sfx('success'); App.router.go('#/detail/' + r.id); });
       // 点选时自动补全导演 / 演员，确保资料正确
       if (enrich && seed.tmdbId && key) {
-        App.tmdb.details(seed.tmdbId, key)
-          .then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || []; finish(rec); })
-          .catch(() => finish(rec));
+        const enricher = isTv ? App.tmdb.tvDetails(seed.tmdbId, key) : App.tmdb.details(seed.tmdbId, key);
+        enricher.then(d => {
+          rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || [];
+          if (isTv && rec.tv) { rec.tv.totalEpisodes = d.totalEpisodes || 0; rec.tv.totalSeasons = d.totalSeasons || 0; rec.tv.seasons = d.seasons || []; }
+          finish(rec);
+        }).catch(() => finish(rec));
       } else finish(rec);
     };
     mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
@@ -227,7 +264,12 @@ App.views.list = (function () {
         <div class="search-results disc-results" id="searchResults"></div>
       </div>
       <div class="view-block">
-        <div class="section-title">我的电影库 <span class="hint">${records.length} 部</span>
+        <div class="seg media-seg">
+          <button class="seg-btn ${state.media === 'all' ? 'active' : ''}" data-media="all">全部</button>
+          <button class="seg-btn ${state.media === 'movie' ? 'active' : ''}" data-media="movie">🎬 电影</button>
+          <button class="seg-btn ${state.media === 'tv' ? 'active' : ''}" data-media="tv">📺 剧集</button>
+        </div>
+        <div class="section-title" style="margin-top:10px">我的电影库 <span class="hint" id="listCountHint">${records.length} 部</span>
           <span class="ml-auto" style="display:flex;gap:8px;margin-left:auto">
             <button class="btn sm ghost" id="listDup">清除重复</button>
             <button class="btn sm" id="listMulti">多选删除</button>
@@ -269,6 +311,12 @@ App.views.list = (function () {
     if (lbd) lbd.onclick = () => { const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } lbd.hidden = true; };
     const lcl = document.getElementById('listClear');
     if (lcl) lcl.onclick = () => { const i = document.getElementById('listSearch'); if (i) i.value = ''; state.query = ''; lcl.style.display = 'none'; const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } if (lbd) lbd.hidden = true; renderLibrary(); };
+    // 全部 / 电影 / 剧集 筛选
+    root.querySelectorAll('.media-seg .seg-btn').forEach(b => b.onclick = () => {
+      state.media = b.dataset.media;
+      root.querySelectorAll('.media-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      renderLibrary();
+    });
     bindLongPressLibrary(root);
   }
 

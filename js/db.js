@@ -53,6 +53,7 @@ App.db = (function () {
   // 把记录规整成「按次 entries」结构，并兼容旧数据（顶层 watchedDate/rating/review/comment/quotes）
   function norm(rec) {
     if (!rec) return rec;
+    if (!rec.mediaType) rec.mediaType = 'movie';   // 旧数据（只有电影）默认 movie
     if (!Array.isArray(rec.entries) || !rec.entries.length) {
       const dates = (Array.isArray(rec.watchDates) && rec.watchDates.length) ? rec.watchDates.slice()
         : (rec.watchedDate ? [rec.watchedDate] : []);

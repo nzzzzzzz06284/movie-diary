@@ -47,10 +47,11 @@ App.views.edit = (function () {
 
   function render(param, root) {
     const isNew = !param;
+    const isTv = rec.mediaType === 'tv';
     root.innerHTML = `
       <div class="edit-top">
         <button class="back-arrow" id="backBtn" aria-label="返回">←</button>
-        <h2 style="margin:0;flex:1">${param ? '编辑《' + App.util.escapeHtml(rec.title) + '》' : '添加电影'}</h2>
+        <h2 style="margin:0;flex:1">${param ? '编辑《' + App.util.escapeHtml(rec.title) + '》' : (isTv ? '添加剧集' : '添加电影')}</h2>
       </div>
       <div class="field"><label>观影时间（可添加多次，二刷三刷都记上）</label>
         <div id="dateList" class="date-list"></div>
@@ -59,6 +60,16 @@ App.views.edit = (function () {
           <button class="btn sm" id="addDate" style="flex:0 0 auto">＋ 添加时间</button>
         </div>
       </div>
+      ${isTv ? `
+      <div class="field tv-edit-box">
+        <label>观剧进度（看到第几集）</label>
+        <div class="stepper-row">
+          <span>第</span><button type="button" class="stp" id="tvSMinus">−</button><span class="stp-val" id="tvS">${rec.tv ? (rec.tv.season || 1) : 1}</span><button type="button" class="stp" id="tvSPlus">＋</button>
+          <span>季 · 第</span><button type="button" class="stp" id="tvEMinus">−</button><span class="stp-val" id="tvE">${rec.tv ? (rec.tv.episode || 0) : 0}</span><button type="button" class="stp" id="tvEPlus">＋</button><span>集</span>
+        </div>
+        <div class="tv-info" id="tvInfo"></div>
+        <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="tvDone" ${rec.tv && rec.tv.completed ? 'checked' : ''}> ✅ 标记已看完</label>
+      </div>` : ''}
       <div class="field"><label>电影名</label><input type="text" id="fTitle" value="${App.util.escapeHtml(rec.title || '')}" placeholder="电影名"></div>
       ${key ? `<button class="btn sm block" id="tmdbFill" style="margin-bottom:12px">🔍 联网补全资料（按片名搜 TMDB）</button>` : `<div class="muted" style="margin-bottom:12px">未配置 TMDB 密钥，可在“设置”里填写后自动补全资料。</div>`}
       <div class="field"><label>海报链接 / 上传</label><div class="row"><input type="text" id="fPoster" value="${App.util.escapeHtml(rec.posterUrl || '')}" placeholder="图片网址"><input type="file" id="fPosterFile" accept="image/*" style="flex:0 0 auto"></div></div>
@@ -126,6 +137,26 @@ App.views.edit = (function () {
 
     starPicker('fStars', scheduleSave);
     renderTags(scheduleSave);
+    // 剧集进度：季/集步进 + 标记看完，改动即写入 rec.tv 并自动保存
+    if (isTv) {
+      const tvS = document.getElementById('tvS'), tvE = document.getElementById('tvE');
+      const tvDone = document.getElementById('tvDone'), tvInfo = document.getElementById('tvInfo');
+      rec.tv = rec.tv || { season: 1, episode: 0, completed: false, totalEpisodes: 0, totalSeasons: 0, seasons: [] };
+      const syncTv = () => {
+        rec.tv.season = parseInt(tvS.textContent, 10) || 1;
+        rec.tv.episode = parseInt(tvE.textContent, 10) || 0;
+        rec.tv.completed = !!tvDone.checked;
+        if (tvInfo) tvInfo.textContent = App.util.tvLabel(rec);
+        scheduleSave();
+      };
+      const stepN = (el, d, min) => { let v = parseInt(el.textContent, 10) + d; if (v < min) v = min; el.textContent = v; syncTv(); };
+      document.getElementById('tvSMinus').onclick = () => stepN(tvS, -1, 1);
+      document.getElementById('tvSPlus').onclick = () => stepN(tvS, 1, 1);
+      document.getElementById('tvEMinus').onclick = () => stepN(tvE, -1, 0);
+      document.getElementById('tvEPlus').onclick = () => stepN(tvE, 1, 0);
+      tvDone.onchange = syncTv;
+      syncTv();
+    }
     let entriesData = (App.util.entries(rec).length ? App.util.entries(rec) : [{ seq: 1, watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [] }])
       .map(e => ({
         watchDate: e.watchDate || '',

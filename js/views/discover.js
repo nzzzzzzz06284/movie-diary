@@ -4,7 +4,7 @@ App.views = App.views || {};
 
 App.views.discover = (function () {
   let state = { kind: 'popular', genre: null, lang: null, year: null, page: 1, totalPages: 1, query: '', loading: false,
-                selecting: false, selected: new Set(), movies: [], records: [], key: '' };
+                selecting: false, selected: new Set(), movies: [], records: [], key: '', mediaType: 'movie' };
   let scrollBound = false; // 滚动自动加载只绑定一次
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
   let genreCache = null;   // TMDB 类型列表缓存
@@ -29,8 +29,9 @@ App.views.discover = (function () {
     let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   }
   function inLibrary(m) {
-    return state.records.some(r => (m.tmdbId && r.tmdbId === m.tmdbId)
-      || (r.title || '').toLowerCase() === (m.title || '').toLowerCase());
+    return state.records.some(r => r.mediaType === state.mediaType
+      && ((m.tmdbId && r.tmdbId === m.tmdbId)
+      || (r.title || '').toLowerCase() === (m.title || '').toLowerCase()));
   }
   function makeRecord(seed, opts) { return App.util.makeRecord(seed, opts); }
 
@@ -38,7 +39,8 @@ App.views.discover = (function () {
     const box = document.getElementById('discGrid');
     if (!box) return;
     if (!state.movies.length) {
-      box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query ? '没有匹配的电影' : '暂无电影，去「设置」填 TMDB 密钥'}</div>`;
+      const word = state.mediaType === 'tv' ? '剧集' : '电影';
+      box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query ? '没有匹配的' + word : '暂无' + word + '，去「设置」填 TMDB 密钥'}</div>`;
       return;
     }
     box.innerHTML = state.movies.map(m => {
@@ -116,8 +118,10 @@ App.views.discover = (function () {
       const more = document.getElementById('discMore');
       if (more) { more.style.display = ''; more.innerHTML = '<span class="muted">加载中…</span>'; }
 
-      App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page)
-      .then(data => {
+      const loader = state.mediaType === 'tv'
+        ? App.tmdb.discoverTv({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page)
+        : App.tmdb.discover({ kind, genre: state.genre, lang: state.lang, year: state.year }, state.key, page);
+      loader.then(data => {
         if (my !== reqSeq) return;       // 已有更新的请求，丢弃这份旧结果
         state.page = data.page; state.totalPages = data.totalPages;
         if (append) {
@@ -165,6 +169,7 @@ App.views.discover = (function () {
       box.innerHTML = `<div class="empty"><div class="big">🎬</div>${msg}`
         + (retry ? `<div style="margin-top:12px"><button class="btn sm primary" id="discMsgRetry">重新加载</button></div>` : '')
         + `</div>`;
+      const im = box.querySelector('.big'); if (im) im.textContent = state.mediaType === 'tv' ? '📺' : '🎬';
       if (retry) {
         const b = document.getElementById('discMsgRetry');
         if (b) b.onclick = retry;
@@ -216,19 +221,29 @@ App.views.discover = (function () {
         e.stopPropagation();
         if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
         const seed = { tmdbId: r.dataset.tmdb, title: r.dataset.title, poster: r.dataset.poster, year: r.dataset.year, overview: r.dataset.over };
-        App.util.addToLibrary({
-          tmdbId: seed.tmdbId, title: seed.title, poster: seed.poster, year: seed.year, overview: seed.overview,
-          alreadyInLibrary: () => inLibrary(seed), enrich: false
-        }).then(() => {
-          r.classList.add('added');
-          const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入';
-        });
+        const markAdded = () => { r.classList.add('added'); const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入'; };
+        const isTv = state.mediaType === 'tv';
+        const opts = { tmdbId: seed.tmdbId, title: seed.title, poster: seed.poster, year: seed.year, overview: seed.overview, alreadyInLibrary: () => inLibrary(seed) };
+        if (isTv) {
+          opts.mediaType = 'tv';
+          opts.tv = { season: 1, episode: 0, completed: false, totalEpisodes: 0, totalSeasons: 0, seasons: [] };
+          opts.enrich = false;
+          const finish = (d) => {
+            if (d) { opts.tv.totalEpisodes = d.totalEpisodes || 0; opts.tv.totalSeasons = d.totalSeasons || 0; opts.tv.seasons = d.seasons || []; }
+            App.util.addToLibrary(opts).then(markAdded);
+          };
+          if (state.key) App.tmdb.tvDetails(seed.tmdbId, state.key).then(finish).catch(() => finish(null));
+          else finish(null);
+        } else {
+          opts.enrich = !!state.key;
+          App.util.addToLibrary(opts).then(markAdded);
+        }
       };
       // 点行身：进弹窗补全日期/评分（资料更全）
       r.onclick = () => {
         if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
         if (App.views && App.views.list && App.views.list.quickAdd) {
-          App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over }, true);
+          App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over, mediaType: state.mediaType === 'tv' ? 'tv' : 'movie' }, true);
         }
       };
     });
@@ -247,7 +262,8 @@ App.views.discover = (function () {
       const box = document.getElementById('discResults');
       if (box) { box.classList.add('open'); box.innerHTML = `<div class="sr-head">搜索中…</div>`; }
       const bd = document.getElementById('discBackdrop'); if (bd) bd.hidden = false;
-      App.tmdb.search(q, state.key).then(list => {
+      const searcher = state.mediaType === 'tv' ? App.tmdb.searchTv : App.tmdb.search;
+      searcher(q, state.key).then(list => {
         if (my !== searchSeq) return;
         renderDiscResults(list, q);
       }).catch(() => {
@@ -272,18 +288,28 @@ App.views.discover = (function () {
   // 单个加入：弹窗填日期/评分，可 enrich 资料
   function quickAdd(seed) {
     seed = seed || {};
+    const isTv = state.mediaType === 'tv';
     const mask = document.createElement('div');
     mask.className = 'modal-mask';
     mask.innerHTML = `
       <div class="modal">
-        <h3>加入我的电影库</h3>
+        <h3>加入我的${isTv ? '剧集库' : '电影库'}</h3>
         <div class="preview">
-          ${seed.poster ? `<img src="${seed.poster}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">🎬</div>`}
+          ${seed.poster ? `<img src="${seed.poster}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">${isTv ? '📺' : '🎬'}</div>`}
           <div><div style="font-weight:600">${App.util.escapeHtml(seed.title || '')}</div><div class="muted">${seed.year || ''}</div></div>
         </div>
         <div class="field"><label>观影时间（首刷，可留空稍后补）</label><input type="date" id="qaDate" value=""></div>
         <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 🤔 记不清具体哪天了</label>
         <div class="field" id="qaNoteWrap" style="display:none;margin-top:8px"><label>大概什么时候？（选填）</label><input type="text" id="qaNote" placeholder="如 2020 / 大学时"></div>
+        ${isTv ? `
+        <div class="field tv-add">
+          <label>看到第几集（可留空，稍后在详情补）</label>
+          <div class="stepper-row" id="qaTvRow">
+            <span>第</span><button type="button" class="stp" id="qaSMinus">−</button><span class="stp-val" id="qaS">1</span><button type="button" class="stp" id="qaSPlus">＋</button>
+            <span>季 · 第</span><button type="button" class="stp" id="qaEMinus">−</button><span class="stp-val" id="qaE">0</span><button type="button" class="stp" id="qaEPlus">＋</button><span>集</span>
+          </div>
+          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> ✅ 已经看完</label>
+        </div>` : ''}
         <div class="field"><label>快速评分（可留空，进详情再评）</label><div class="stars" id="qaStars"></div></div>
         <div style="display:flex;gap:10px;margin-top:6px">
           <button class="btn block" id="qaCancel">取消</button>
@@ -295,16 +321,36 @@ App.views.discover = (function () {
     const starsBox = mask.querySelector('#qaStars');
     function paintStars() { starsBox.innerHTML = [1,2,3,4,5].map(i => `<span class="s ${i <= rating ? 'on' : ''}" data-i="${i}">★</span>`).join(''); starsBox.querySelectorAll('.s').forEach(s => s.onclick = () => { rating = +s.dataset.i; paintStars(); }); }
     paintStars();
+    if (isTv) {
+      const qaS = mask.querySelector('#qaS'), qaE = mask.querySelector('#qaE');
+      const stepN = (el, d, min) => { let v = parseInt(el.textContent, 10) + d; if (v < min) v = min; el.textContent = v; };
+      mask.querySelector('#qaSMinus').onclick = () => stepN(qaS, -1, 1);
+      mask.querySelector('#qaSPlus').onclick = () => stepN(qaS, 1, 1);
+      mask.querySelector('#qaEMinus').onclick = () => stepN(qaE, -1, 0);
+      mask.querySelector('#qaEPlus').onclick = () => stepN(qaE, 1, 0);
+    }
     const qaUnk = mask.querySelector('#qaUnknown'), qaNoteWrap = mask.querySelector('#qaNoteWrap'), qaDate = mask.querySelector('#qaDate');
     qaUnk.onchange = () => { qaDate.disabled = qaUnk.checked; qaNoteWrap.style.display = qaUnk.checked ? 'block' : 'none'; if (qaUnk.checked) qaDate.value = ''; };
     mask.querySelector('#qaCancel').onclick = () => mask.remove();
     mask.querySelector('#qaOk').onclick = () => {
       const unknown = qaUnk.checked, note = mask.querySelector('#qaNote').value.trim();
       const date = unknown ? '' : (qaDate.value || '');
-      const rec = makeRecord(seed, { date, unknown, note, rating: rating || 0 });
-      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入我的电影库 🎉'); App.audio.sfx('success'); reload().then(renderGrid); });
-      if (seed.tmdbId && state.key) App.tmdb.details(seed.tmdbId, state.key).then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || []; finish(rec); }).catch(() => finish(rec));
-      else finish(rec);
+      const opts = { date, unknown, note, rating: rating || 0 };
+      if (isTv) {
+        const s = mask.querySelector('#qaS'), e = mask.querySelector('#qaE'), done = mask.querySelector('#qaDone');
+        opts.mediaType = 'tv';
+        opts.tv = { season: parseInt(s.textContent, 10) || 1, episode: parseInt(e.textContent, 10) || 0, completed: !!(done && done.checked), totalEpisodes: 0, totalSeasons: 0, seasons: [] };
+      }
+      const rec = makeRecord(seed, opts);
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入我的' + (isTv ? '剧集库' : '电影库') + ' 🎉'); App.audio.sfx('success'); reload().then(renderGrid); });
+      if (seed.tmdbId && state.key) {
+        const enricher = isTv ? App.tmdb.tvDetails(seed.tmdbId, state.key) : App.tmdb.details(seed.tmdbId, state.key);
+        enricher.then(d => {
+          rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || seed.year; rec.genres = d.genres || [];
+          if (isTv && rec.tv) { rec.tv.totalEpisodes = d.totalEpisodes || 0; rec.tv.totalSeasons = d.totalSeasons || 0; rec.tv.seasons = d.seasons || []; }
+          finish(rec);
+        }).catch(() => finish(rec));
+      } else finish(rec);
     };
     mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
   }
@@ -312,23 +358,32 @@ App.views.discover = (function () {
   // 批量加入：多选的电影一次性建记录（仅基础字段，后续在「我的电影库」补心得）
   function batchAdd() {
     const picks = state.movies.filter(m => state.selected.has(String(m.tmdbId)) && !inLibrary(m));
-    if (!picks.length) { App.util.toast('没有可加入的新电影'); return; }
+    if (!picks.length) { App.util.toast('没有可加入的新' + (state.mediaType === 'tv' ? '剧集' : '电影')); return; }
+    const isTv = state.mediaType === 'tv';
     let i = 0, ok = 0;
-    App.util.toast('正在加入 ' + picks.length + ' 部…');
+    App.util.toast('正在加入 ' + picks.length + ' ' + (isTv ? '部剧集…' : '部…'));
     function next() {
       if (i >= picks.length) {
         state.selected.clear();   // 清零已选计数，保持在多选模式继续选择
         updateBatch();
-        App.util.toast('已加入 ' + ok + ' 部，继续选择或点「完成」退出 🎉');
+        App.util.toast('已加入 ' + ok + (isTv ? ' 部剧集' : ' 部') + '，继续选择或点「完成」退出 🎉');
         App.audio.sfx('success');
         reload().then(renderGrid);
         return;
       }
       const m = picks[i++];
-      const rec = makeRecord(m, { date: '', unknown: false, note: '', rating: 0 });
+      const opts = { date: '', unknown: false, note: '', rating: 0 };
+      if (isTv) { opts.mediaType = 'tv'; opts.tv = { season: 1, episode: 0, completed: false, totalEpisodes: 0, totalSeasons: 0, seasons: [] }; }
+      const rec = makeRecord(m, opts);
       const finish = (r) => App.db.saveRecord(r).then(() => { ok++; next(); });
-      if (m.tmdbId && state.key) App.tmdb.details(m.tmdbId, state.key).then(d => { rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || m.year; rec.genres = d.genres || []; finish(rec); }).catch(() => finish(rec));
-      else finish(rec);
+      if (m.tmdbId && state.key) {
+        const enricher = isTv ? App.tmdb.tvDetails(m.tmdbId, state.key) : App.tmdb.details(m.tmdbId, state.key);
+        enricher.then(d => {
+          rec.director = d.director || ''; rec.cast = d.cast || []; rec.castInfo = d.castInfo || []; rec.overview = d.overview || rec.overview; rec.year = d.year || m.year; rec.genres = d.genres || [];
+          if (isTv && rec.tv) { rec.tv.totalEpisodes = d.totalEpisodes || 0; rec.tv.totalSeasons = d.totalSeasons || 0; rec.tv.seasons = d.seasons || []; }
+          finish(rec);
+        }).catch(() => finish(rec));
+      } else finish(rec);
     }
     next();
   }
@@ -383,7 +438,8 @@ App.views.discover = (function () {
         applyFilter(root);
       });
       if (!genreCache && state.key) {
-        App.tmdb.genres(state.key).then(list => {
+        const gApi = state.mediaType === 'tv' ? App.tmdb.tvGenres : App.tmdb.genres;
+        gApi(state.key).then(list => {
           if (!list || !list.length) return;
           genreCache = list;
           if (document.body.contains(gbar)) paintFilters(root); // 只刷新文案，不重新请求列表
@@ -529,7 +585,7 @@ App.views.discover = (function () {
   function openMovie(m) {
     if (!m) return;
     if (inLibrary(m)) {
-      const rec = state.records.find(r => String(r.tmdbId) === String(m.tmdbId));
+      const rec = state.records.find(r => r.mediaType === state.mediaType && String(r.tmdbId) === String(m.tmdbId));
       if (rec) { App.audio && App.audio.sfx('click'); App.router.go('#/detail/' + rec.id); return; }
     }
     quickAdd(m);
@@ -698,11 +754,16 @@ App.views.discover = (function () {
 
   function render(param, root) {
     const kindName = { popular: '热门', now_playing: '最新', top_rated: '高分' };
+    const isTv = state.mediaType === 'tv';
     root.innerHTML = `
       <div class="view-block search-wrap">
+        <div class="media-toggle">
+          <button class="mt-btn ${!isTv ? 'active' : ''}" data-mt="movie">🎬 电影</button>
+          <button class="mt-btn ${isTv ? 'active' : ''}" data-mt="tv">📺 剧集</button>
+        </div>
         <div class="search-bar">
           <span class="ico">🔍</span>
-          <input id="discSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜电影名…">
+          <input id="discSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="${isTv ? '搜剧集名…' : '搜电影名…'}">
           <span class="search-clear" id="discClear" style="display:none">✕</span>
         </div>
         <div class="disc-backdrop" id="discBackdrop" hidden></div>
@@ -732,7 +793,7 @@ App.views.discover = (function () {
         <div class="genre-bar" id="discYears"></div>
       </div>
       <div class="view-block" style="display:flex;align-items:center;justify-content:space-between;margin:2px 0 8px">
-        <div class="section-title" style="margin:0">电影库 <span class="hint" id="discKindHint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
+        <div class="section-title" style="margin:0"><span id="discSectionTitle">${isTv ? '剧集库' : '电影库'}</span> <span class="hint" id="discKindHint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
         <button class="btn sm" id="discMulti">多选</button>
       </div>
       <div id="discGrid" class="movie-grid discover"></div>
@@ -748,6 +809,26 @@ App.views.discover = (function () {
       const hint = root.querySelector('#discKindHint');
       if (hint) hint.textContent = kindName[state.kind] || '';
       resetFiltersAndLoad(root);   // 会清搜索框、解掉可能卡住的 loading，再重新拉第一页
+    });
+    // 左上角 电影 / 剧集 切换：换数据源 + 清筛选 + 重置列表
+    root.querySelectorAll('.mt-btn').forEach(b => b.onclick = () => {
+      const mt = b.dataset.mt;
+      if (state.mediaType === mt) return;
+      state.mediaType = mt;
+      root.querySelectorAll('.mt-btn').forEach(x => x.classList.toggle('active', x.dataset.mt === mt));
+      const isNowTv = mt === 'tv';
+      // 重置所有筛选，避免上一类的筛选套到这一类上
+      state.kind = 'popular';
+      state.genre = null; state.lang = null; state.year = null; state.query = '';
+      const inp = root.querySelector('#discSearch');
+      if (inp) { inp.value = ''; inp.placeholder = isNowTv ? '搜剧集名…' : '搜电影名…'; }
+      const clr = root.querySelector('#discClear'); if (clr) clr.style.display = 'none';
+      root.querySelectorAll('.seg-btn').forEach(x => x.classList.toggle('active', x.dataset.kind === 'popular'));
+      const hint = root.querySelector('#discKindHint'); if (hint) hint.textContent = kindName['popular'];
+      const st = root.querySelector('#discSectionTitle'); if (st) st.textContent = isNowTv ? '剧集库' : '电影库';
+      const kindHint = root.querySelector('#discKindHint');
+      if (state.selecting) { state.selected.clear(); exitSelect(); }
+      loadList('popular', 1, false);
     });
     const input = root.querySelector('#discSearch');
     input.oninput = debounce((e) => {

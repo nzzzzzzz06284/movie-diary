@@ -196,5 +196,85 @@ App.tmdb = (function () {
     try { localStorage.removeItem(CK); } catch (e) {}
   }
 
-  return { search, details, poster, lists, genres, byGenre, discover, ping, clearCache };
+  // ===== 电视剧（TV）支持：复用同一套超时/重试/缓存机制 =====
+  function mapTv(m) {
+    return {
+      tmdbId: m.id,
+      title: m.name || m.title || '',
+      year: m.first_air_date ? m.first_air_date.slice(0, 4) : '',
+      poster: poster(m.poster_path),
+      overview: m.overview || '',
+      rating: m.vote_average || 0,
+      genres: (m.genre_ids || []).map(id => String(id)),
+      mediaType: 'tv'
+    };
+  }
+  function mapTvPage(data) {
+    return {
+      page: data.page || 1,
+      totalPages: Math.min(data.total_pages || 1, 500),
+      results: (data.results || []).map(mapTv)
+    };
+  }
+  // 剧集搜索
+  function searchTv(query, apiKey) {
+    return api('/search/tv', { language: 'zh-CN', include_adult: 'false', query: query }, apiKey)
+      .then(data => (data.results || []).slice(0, 8).map(mapTv));
+  }
+  // 剧集列表：popular / top_rated / on_the_air（在播，对应电影「最新」）
+  function tvLists(kind, apiKey, page) {
+    const path = kind === 'now_playing' ? '/tv/on_the_air' : '/tv/' + kind;
+    return api(path, { language: 'zh-CN', page: page || 1 }, apiKey).then(mapTvPage);
+  }
+  // 剧集类型列表（中文）
+  function tvGenres(apiKey) {
+    return api('/genre/tv/list', { language: 'zh-CN' }, apiKey).then(d => d.genres || []);
+  }
+  // 按类型发现剧集（复用电影的筛选逻辑，字段通用）
+  function discoverTv(opts, apiKey, page) {
+    opts = opts || {};
+    if (opts.kind === 'now_playing') {
+      return api('/tv/on_the_air', { language: 'zh-CN', page: page || 1 }, apiKey).then(mapTvPage);
+    }
+    const sorts = { popular: 'popularity.desc', top_rated: 'vote_average.desc' };
+    const p = {
+      language: 'zh-CN',
+      page: page || 1,
+      include_adult: 'false',
+      sort_by: sorts[opts.kind] || 'popularity.desc'
+    };
+    if (opts.kind === 'top_rated') p['vote_count.gte'] = 50;
+    if (opts.genre) p.with_genres = opts.genre;
+    if (opts.lang) p.with_original_language = (opts.lang === 'other') ? OTHER_LANGS : opts.lang;
+    if (opts.year === 'old') p['first_air_date.lte'] = '2021-12-31';
+    else if (opts.year) p.first_air_year = opts.year;
+    return api('/discover/tv', p, apiKey).then(mapTvPage);
+  }
+  // 剧集详情：补全主创 / 演员 / 类型 / 总季数 / 每季集数（供「看到第几集」选择）
+  function tvDetails(tmdbId, apiKey) {
+    return Promise.all([
+      api('/tv/' + tmdbId, { language: 'zh-CN' }, apiKey),
+      api('/tv/' + tmdbId + '/credits', { language: 'zh-CN' }, apiKey).catch(() => ({}))
+    ]).then(([m, c]) => {
+      const createdBy = (m.created_by || []).map(x => x.name).join('、');
+      const cast = (c.cast || []).slice(0, 5).map(x => x.name);
+      const castInfo = (c.cast || []).slice(0, 12).map(x => ({
+        name: x.name,
+        character: x.character || '',
+        profile: x.profile_path ? 'https://image.tmdb.org/t/p/w185' + x.profile_path : ''
+      }));
+      const seasons = (m.seasons || []).filter(s => s.season_number > 0).map(s => ({ s: s.season_number, n: s.episode_count || 0 }));
+      return {
+        title: m.name, year: m.first_air_date ? m.first_air_date.slice(0, 4) : '',
+        poster: poster(m.poster_path), overview: m.overview || '',
+        director: createdBy, cast, castInfo,
+        genres: (m.genres || []).map(g => g.name),
+        totalEpisodes: m.number_of_episodes || 0,
+        totalSeasons: m.number_of_seasons || 0,
+        seasons
+      };
+    });
+  }
+
+  return { search, searchTv, details, tvDetails, poster, lists, tvLists, genres, tvGenres, byGenre, discover, discoverTv, ping, clearCache };
 })();

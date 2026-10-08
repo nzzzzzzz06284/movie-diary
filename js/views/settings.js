@@ -37,12 +37,27 @@ App.views.settings = (function () {
         <input type="file" id="importFile" accept="application/json" hidden>
         <p class="muted" style="margin-top:8px">备份文件包含全部电影和截图，请妥善保存、不要公开分享。</p>
 
-        <div class="section-title" style="margin-top:14px">📂 数据同步（自动防丢 · 进知识库）</div>
+        <div class="section-title" style="margin-top:14px">☁️ GitHub 云端同步（推荐 · 手机也能用）</div>
+        <div id="ghStatus" class="muted" style="font-size:12px;margin-bottom:8px">未配置</div>
+        <div class="field"><label>访问令牌 Token</label><input type="password" id="ghToken" value="${App.util.escapeHtml(settings.ghToken || '')}" placeholder="github_pat_xxx 或 ghp_xxx" autocomplete="off"></div>
+        <div class="field"><label>仓库（用户名/仓库名）</label><input type="text" id="ghRepo" value="${App.util.escapeHtml(settings.ghRepo || '')}" placeholder="比如 yourname/movie-diary-data"></div>
+        <div class="field" style="display:flex;gap:8px">
+          <div style="flex:1"><label>分支</label><input type="text" id="ghBranch" value="${App.util.escapeHtml(settings.ghBranch || 'main')}" placeholder="main"></div>
+          <div style="flex:1"><label>文件名</label><input type="text" id="ghPath" value="${App.util.escapeHtml(settings.ghPath || 'movie-diary-data.json')}" placeholder="movie-diary-data.json"></div>
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn primary block" id="saveGh">保存并测试</button>
+          <button class="btn block" id="ghRestore">从云端恢复</button>
+        </div>
+        <p class="muted" id="ghTestOut" style="margin-top:6px"></p>
+        <p class="muted" style="margin-top:8px">数据每次变动自动存到这个<b>私有</b>仓库，清手机/换手机后重开 app 自动恢复，<b>不用手动导出</b>。建议：新建一个私有仓库专放数据；令牌用「Fine-grained PAT」只授权这一个仓库的 Contents 读写。令牌只存在你本机，不会上传。</p>
+
+        <div class="section-title" style="margin-top:14px">📂 本地文件夹同步（仅桌面 Edge/Chrome）</div>
         <div id="syncStatus" class="muted" style="font-size:12px;margin-bottom:8px">未连接同步文件夹</div>
         <button class="btn block" id="chooseSync">选择同步文件夹</button>
         <div style="height:10px"></div>
-        <button class="btn block" id="pushSync">立即同步</button>
-        <p class="muted" style="margin-top:8px">仅 Edge / Chrome 桌面版支持。选择后会把数据自动写成 <b>movie-diary-latest.json</b> 到该文件夹（含截图，可完整恢复）。配云盘同步该文件夹即自动上云。手机端请用上方「导出备份」。</p>
+        <button class="btn block" id="pushSync">立即同步（桌面+云端）</button>
+        <p class="muted" style="margin-top:8px">桌面版会把数据写成 <b>movie-diary-latest.json</b> 到所选文件夹（含截图），供 Hermes 摄入知识库。手机端请用上方 GitHub 云端同步。</p>
       </div>
 
       <hr class="sep">
@@ -98,7 +113,7 @@ App.views.settings = (function () {
         <div class="help-step"><div class="n">1</div><div class="t"><b>添加电影</b>：首页搜索栏输入片名 → 电影海报自动弹出 → 点一下选观影时间即进电影库（需先在“设置”填 TMDB 免费密钥）。没有密钥也可手动添加。</div></div>
         <div class="help-step"><div class="n">2</div><div class="t"><b>记录内容</b>：点进电影，用四个分栏写——<b>观影感受</b>、<b>喜欢的台词</b>、<b>最美定格</b>（上传截图+评论+标最美）、<b>评论区</b>（评分+短评）。</div></div>
         <div class="help-step"><div class="n">3</div><div class="t"><b>看统计</b>：底部“统计”看今年观影数、平均分、<b>观影偏好</b>（各类型看了多少）、按月趋势和评分分布。</div></div>
-        <div class="help-step"><div class="n">4</div><div class="t"><b>定期备份</b>：在“设置”里点导出备份，防止数据丢失。</div></div>
+        <div class="help-step"><div class="n">4</div><div class="t"><b>防丢</b>：在“设置”里配置「GitHub 云端同步」并保存，之后每次改动自动上云，清手机/换手机重开即恢复，不用手动导出。</div></div>
       </div>
 
       <hr class="sep">
@@ -139,7 +154,29 @@ App.views.settings = (function () {
     }
     paintSync();
     document.getElementById('chooseSync').onclick = () => App.sync.chooseDir().then(() => paintSync());
-    document.getElementById('pushSync').onclick = () => App.sync.pushNow();
+    document.getElementById('pushSync').onclick = () => { App.sync.pushNow(); App.sync.ghPushNow && App.sync.ghPushNow(); };
+
+    // ---- GitHub 云端同步 ----
+    const ghStatusEl = document.getElementById('ghStatus');
+    const ghTestOut = document.getElementById('ghTestOut');
+    function paintGh() {
+      const on = !!(settings.ghToken && settings.ghRepo);
+      ghStatusEl.textContent = on ? ('已配置：' + settings.ghRepo + '（数据变动自动同步）') : '未配置（清手机会丢数据）';
+    }
+    paintGh();
+    document.getElementById('saveGh').onclick = async () => {
+      settings.ghToken = document.getElementById('ghToken').value.trim();
+      settings.ghRepo = document.getElementById('ghRepo').value.trim();
+      settings.ghBranch = document.getElementById('ghBranch').value.trim() || 'main';
+      settings.ghPath = document.getElementById('ghPath').value.trim() || 'movie-diary-data.json';
+      await App.db.saveSettings(settings);
+      App.util.toast('已保存');
+      const r = await App.sync.ghTest();
+      ghTestOut.textContent = r;
+      paintGh();
+      App.sync.ghPushNow && App.sync.ghPushNow();
+    };
+    document.getElementById('ghRestore').onclick = () => App.sync.restore().then(() => paintGh());
 
     // ---- Hermes 智能助手 ----
     const hermesUrlEl = document.getElementById('hermesUrl');
