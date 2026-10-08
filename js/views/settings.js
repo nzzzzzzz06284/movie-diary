@@ -49,7 +49,7 @@ App.views.settings = (function () {
           <button class="btn primary block" id="saveGh">保存并测试</button>
           <button class="btn block" id="ghRestore">从云端恢复</button>
         </div>
-        <p class="muted" id="ghTestOut" style="margin-top:6px"></p>
+        <p class="muted" id="ghTestOut" style="margin-top:6px;white-space:pre-wrap;word-break:break-word"></p>
         <p class="muted" style="margin-top:8px">数据每次变动自动存到这个<b>私有</b>仓库，清手机/换手机后重开 app 自动恢复，<b>不用手动导出</b>。建议：新建一个私有仓库专放数据；令牌用「Fine-grained PAT」只授权这一个仓库的 Contents 读写。令牌只存在你本机，不会上传。</p>
 
         <div class="section-title" style="margin-top:14px">📂 本地文件夹同步（仅桌面 Edge/Chrome）</div>
