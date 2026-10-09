@@ -12,7 +12,7 @@ App.views.settings = (function () {
       <h2 style="margin:4px 2px 14px">设置</h2>
 
       <div class="view-block">
-        <div class="section-title">🔑 TMDB 密钥（自动搜资料）</div>
+        <div class="section-title">${App.util.icon('key', { size: 16 })}TMDB 密钥（自动搜资料）</div>
         <div class="field">
           <label>API Key（v3 auth）</label>
           <input type="text" id="apiKey" value="${App.util.escapeHtml(settings.tmdbApiKey || '')}" placeholder="在 themoviedb.org 注册后获取">
@@ -30,17 +30,17 @@ App.views.settings = (function () {
       <hr class="sep">
 
       <div class="view-block">
-        <div class="section-title">💾 数据备份</div>
+        <div class="section-title">${App.util.icon('save', { size: 16 })}数据备份</div>
         <button class="btn block" id="exportBtn">导出备份（JSON）</button>
         <div style="height:10px"></div>
         <button class="btn block" id="importBtn">导入备份（JSON）</button>
         <input type="file" id="importFile" accept="application/json" hidden>
         <p class="muted" style="margin-top:8px">备份文件包含全部电影和截图，请妥善保存、不要公开分享。</p>
 
-        <div class="section-title" style="margin-top:14px">☁️ 云端同步（推荐 · 手机也能用）</div>
+        <div class="section-title" style="margin-top:14px">${App.util.icon('cloud', { size: 16 })}云端同步（推荐 · 手机也能用）</div>
         <div id="ghStatus" class="muted" style="font-size:12px;margin-bottom:8px">未配置</div>
         <div class="field"><label>服务商</label>
-          <select id="ghProvider" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--text)">
+          <select id="ghProvider" style="width:100%;padding:10px;border-radius:10px;border:1px solid var(--border);background:var(--surface);color:var(--text)">
             <option value="gitee">Gitee 码云（国内直连，推荐）</option>
             <option value="github">GitHub（需能访问 api.github.com）</option>
           </select>
@@ -59,7 +59,7 @@ App.views.settings = (function () {
         <p class="muted" id="ghTestOut" style="margin-top:6px;white-space:pre-wrap;word-break:break-word"></p>
         <p class="muted" style="margin-top:8px">数据每次变动自动存到这个<b>私有</b>仓库，清手机/换手机后重开 app 自动恢复，<b>不用手动导出</b>。<br><b>Gitee（推荐）：</b>gitee.com 注册 → 新建<b>私有</b>仓库（如 movie-diary-data）→ 设置 → 私人令牌（勾选 projects）→ 把令牌和 用户名/仓库名 填上面即可，国内直连不用 VPN。<br><b>GitHub：</b>需能访问 api.github.com，通常还需自建中继。</p>
 
-        <div class="section-title" style="margin-top:14px">📂 本地文件夹同步（仅桌面 Edge/Chrome）</div>
+        <div class="section-title" style="margin-top:14px">${App.util.icon('folder', { size: 16 })}本地文件夹同步（仅桌面 Edge/Chrome）</div>
         <div id="syncStatus" class="muted" style="font-size:12px;margin-bottom:8px">未连接同步文件夹</div>
         <button class="btn block" id="chooseSync">选择同步文件夹</button>
         <div style="height:10px"></div>
@@ -70,7 +70,7 @@ App.views.settings = (function () {
       <hr class="sep">
 
       <div class="view-block">
-        <div class="section-title">🤖 Hermes 智能助手</div>
+        <div class="section-title">${App.util.icon('bot', { size: 16 })}Hermes 智能助手</div>
         <div class="field">
           <label>网关地址</label>
           <input type="text" id="hermesUrl" value="${App.util.escapeHtml(settings.hermesUrl || 'http://localhost:8642')}" placeholder="http://localhost:8642">
@@ -84,13 +84,13 @@ App.views.settings = (function () {
           <button class="btn block" id="testHermes">测试连接</button>
         </div>
         <div id="hermesTest" class="muted" style="font-size:12px;margin-top:8px"></div>
-        <p class="muted" style="margin-top:8px">助手会读取你电影库的真实数据，让 Hermes 帮你推荐电影、生成年度报告。<b>前置：</b>需在 Hermes 里开启 API 网关（默认端口 8642），并把网关 CORS 设为 <b>*</b>（否则网页跨域被拦）。详见《开启 Hermes 网关指引》。</p>
+        <p class="muted" style="margin-top:8px">助手会读取你影音库的真实数据，让 Hermes 帮你推荐电影、生成年度报告。<b>前置：</b>需在 Hermes 里开启 API 网关（默认端口 8642），并把网关 CORS 设为 <b>*</b>（否则网页跨域被拦）。详见《开启 Hermes 网关指引》。</p>
       </div>
 
       <hr class="sep">
 
       <div class="view-block">
-        <div class="section-title">🎵 音乐和音效</div>
+        <div class="section-title">${App.util.icon('music', { size: 16 })}音乐和音效</div>
 
         <div class="switch-row">
           <div><b>操作音效</b><div class="muted" style="font-size:12px">点击、保存等时的轻提示音</div></div>
@@ -99,15 +99,15 @@ App.views.settings = (function () {
 
         <div class="section-title" style="margin-top:14px">背景音乐</div>
         <div class="play-modes" id="playModes">
-          <button class="pm" data-mode="loop" title="循环播放">🔁</button>
-          <button class="pm" data-mode="list" title="列表播放">📃</button>
-          <button class="pm" data-mode="shuffle" title="随机播放">🔀</button>
+          <button class="pm" data-mode="loop" title="循环播放">${App.util.icon('loop', { size: 17 })}</button>
+          <button class="pm" data-mode="list" title="列表播放">${App.util.icon('list', { size: 17 })}</button>
+          <button class="pm" data-mode="shuffle" title="随机播放">${App.util.icon('shuffle', { size: 17 })}</button>
         </div>
         <div id="musicList" class="music-list"></div>
 
         <div style="display:flex;gap:10px;margin-top:10px">
-          <button class="btn block" id="addMusic">＋ 添加我的音乐</button>
-          <button class="btn block" id="stopMusic">⏹ 停止</button>
+          <button class="btn block" id="addMusic">${App.util.icon('plus', { size: 15 })} 添加我的音乐</button>
+          <button class="btn block" id="stopMusic">${App.util.icon('pause', { size: 15 })} 停止</button>
         </div>
         <input type="file" id="musicFile" accept="audio/*" hidden>
         <p class="muted" style="margin-top:8px">自带「雨声 / 森林 / 轻音乐」三种环境音，零流量；也可上传你自己的音频（仅存本机）。数据都不联网。</p>
@@ -116,8 +116,8 @@ App.views.settings = (function () {
       <hr class="sep">
 
       <div class="view-block">
-        <div class="section-title">📖 使用说明</div>
-        <div class="help-step"><div class="n">1</div><div class="t"><b>添加电影</b>：首页搜索栏输入片名 → 电影海报自动弹出 → 点一下选观影时间即进电影库（需先在“设置”填 TMDB 免费密钥）。没有密钥也可手动添加。</div></div>
+        <div class="section-title">${App.util.icon('book', { size: 16 })}使用说明</div>
+        <div class="help-step"><div class="n">1</div><div class="t"><b>添加电影</b>：首页搜索栏输入片名 → 电影海报自动弹出 → 点一下选观影时间即进影音库（需先在“设置”填 TMDB 免费密钥）。没有密钥也可手动添加。</div></div>
         <div class="help-step"><div class="n">2</div><div class="t"><b>记录内容</b>：点进电影，用四个分栏写——<b>观影感受</b>、<b>喜欢的台词</b>、<b>最美定格</b>（上传截图+评论+标最美）、<b>评论区</b>（评分+短评）。</div></div>
         <div class="help-step"><div class="n">3</div><div class="t"><b>看统计</b>：底部“统计”看今年观影数、平均分、<b>观影偏好</b>（各类型看了多少）、按月趋势和评分分布。</div></div>
         <div class="help-step"><div class="n">4</div><div class="t"><b>防丢</b>：在“设置”里配置「云端同步」（选 Gitee 码云，国内直连）并保存，之后每次改动自动上云，清手机/换手机重开即恢复，不用手动导出。</div></div>
@@ -131,19 +131,19 @@ App.views.settings = (function () {
       settings.tmdbApiKey = document.getElementById('apiKey').value.trim();
       App.db.saveSettings(settings).then(() => { App.util.toast('密钥已保存'); App.audio.sfx('success'); });
     };
-    // 连通性自检 / 缓存修复（电影库加载不出来时的第一手段）
+    // 连通性自检 / 缓存修复（影音库加载不出来时的第一手段）
     const tEl = document.getElementById('tmdbTest');
     document.getElementById('testTmdb').onclick = () => {
       const k = document.getElementById('apiKey').value.trim();
       if (!k) { tEl.textContent = '先填密钥再检测'; return; }
       tEl.textContent = '检测中…（最多等 8 秒）';
       App.tmdb.ping(k).then(ok => {
-        tEl.textContent = ok ? '✅ 连接正常，电影库可以正常加载' : '❌ 连不上 TMDB：可能是密钥不对、或当前网络被限制（换 WiFi / 数据流量再试）';
+        tEl.textContent = ok ? '✅ 连接正常，影音库可以正常加载' : '❌ 连不上 TMDB：可能是密钥不对、或当前网络被限制（换 WiFi / 数据流量再试）';
       });
     };
     document.getElementById('fixTmdb').onclick = () => {
       App.tmdb.clearCache();
-      tEl.textContent = '✅ 已清空接口缓存，回「电影库」重新加载试试';
+      tEl.textContent = '✅ 已清空接口缓存，回「影音库」重新加载试试';
       App.util.toast('缓存已清空');
     };
 
@@ -225,7 +225,7 @@ App.views.settings = (function () {
       settings.playMode = b.dataset.mode;
       App.db.saveSettings(settings);
       paintModes();
-      App.util.toast({ loop: '🔁 循环播放', list: '📃 列表播放', shuffle: '🔀 随机播放' }[b.dataset.mode] || '');
+      App.util.toast({ loop: '循环播放', list: '列表播放', shuffle: '随机播放' }[b.dataset.mode] || '');
     });
     paintModes();
     const sfxEl = document.getElementById('sfxOn');
@@ -254,15 +254,15 @@ App.views.settings = (function () {
         const playing = st.musicOn && st.current && st.current.type === 'ambient' && st.current.id === b.id;
         return `<div class="music-item">
           <div class="m-info"><div class="m-name">${b.name}</div><div class="m-desc">${b.desc}</div></div>
-          <button class="btn sm ${playing ? 'primary' : ''}" data-amb="${b.id}">${playing ? '⏸' : '▶'}</button>
+          <button class="btn sm ${playing ? 'primary' : ''}" data-amb="${b.id}">${playing ? App.util.icon('pause', { size: 14 }) : App.util.icon('play', { size: 14 })}</button>
         </div>`;
       }).join('');
       const user = tracks.length ? tracks.map(t => {
         const playing = st.musicOn && st.current && st.current.type === 'track' && st.current.id === t.id;
         return `<div class="music-item">
-          <div class="m-info"><div class="m-name">🎵 ${App.util.escapeHtml(t.name)}</div></div>
-          <button class="btn sm ${playing ? 'primary' : ''}" data-track="${t.id}">${playing ? '⏸' : '▶'}</button>
-          <span class="m-del" data-del="${t.id}">✕</span>
+          <div class="m-info"><div class="m-name">${App.util.escapeHtml(t.name)}</div></div>
+          <button class="btn sm ${playing ? 'primary' : ''}" data-track="${t.id}">${playing ? App.util.icon('pause', { size: 14 }) : App.util.icon('play', { size: 14 })}</button>
+          <span class="m-del" data-del="${t.id}">${App.util.icon('close', { size: 14 })}</span>
         </div>`;
       }).join('') : '<div class="muted" style="padding:4px 0">还没有添加自己的音乐</div>';
       musicListEl.innerHTML = builtin + user;
