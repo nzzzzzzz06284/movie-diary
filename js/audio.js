@@ -12,9 +12,9 @@ App.audio = (function () {
 
   // 内置音景名称（给用户看）
   const BUILTIN = [
-    { id: 'rain',  name: '🌧 雨声',   desc: '安心的雨落声' },
-    { id: 'forest', name: '🌲 森林',  desc: '林间微风与鸟鸣' },
-    { id: 'lofi',  name: '🎹 轻音乐', desc: '柔和的氛围和弦' }
+    { id: 'rain',  name: '雨声',   desc: '安心的雨落声' },
+    { id: 'forest', name: '森林',  desc: '林间微风与鸟鸣' },
+    { id: 'lofi',  name: '轻音乐', desc: '柔和的氛围和弦' }
   ];
 
   function ensureCtx() {
