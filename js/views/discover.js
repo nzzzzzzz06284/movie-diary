@@ -1,4 +1,4 @@
-// 视图：电影库（发现页）—— TMDB 全量片库网格 + 搜索 + 多选批量加入我的电影库
+// 视图：影音库（发现页）—— TMDB 全量片库网格 + 搜索 + 多选批量加入我的影音库
 window.App = window.App || {};
 App.views = App.views || {};
 
@@ -23,7 +23,7 @@ App.views.discover = (function () {
 
   function posterBlock(poster) {
     if (poster) return `<div class="poster"><img loading="lazy" decoding="async" src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
-    return `<div class="poster ph">🎬</div>`;
+    return `<div class="poster ph">${App.util.icon('film', { size: 26, sw: 1.5 })}</div>`;
   }
   function debounce(fn, ms) {
     let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
@@ -40,7 +40,7 @@ App.views.discover = (function () {
     if (!box) return;
     if (!state.movies.length) {
       const word = state.mediaType === 'tv' ? '剧集' : '电影';
-      box.innerHTML = `<div class="empty"><div class="big">🎞️</div>${state.query ? '没有匹配的' + word : '暂无' + word + '，去「设置」填 TMDB 密钥'}</div>`;
+      box.innerHTML = `<div class="empty"><div class="big">${App.util.icon(state.mediaType === 'tv' ? 'tv' : 'film', { size: 44, sw: 1.4 })}</div>${state.query ? '没有匹配的' + word : '暂无' + word + '，去「设置」填 TMDB 密钥'}</div>`;
       return;
     }
     box.innerHTML = state.movies.map(m => {
@@ -59,7 +59,7 @@ App.views.discover = (function () {
       if (suppressClick) { suppressClick = false; return; }
       const m = { tmdbId: c.dataset.tmdb, title: c.dataset.title, year: c.dataset.year, poster: c.dataset.poster, overview: c.dataset.over };
       if (state.selecting) {
-        if (c.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (c.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         const id = c.dataset.id;
         if (state.selected.has(id)) state.selected.delete(id); else state.selected.add(id);
         c.classList.toggle('sel');
@@ -91,7 +91,7 @@ App.views.discover = (function () {
       const b = document.getElementById('discLoadMore');
       if (b) b.onclick = () => loadList(state.kind, state.page + 1, true);
     } else {
-      more.innerHTML = state.movies.length ? '<span class="muted">已经到底啦 🎬</span>' : '';
+      more.innerHTML = state.movies.length ? '<span class="muted">已经到底啦</span>' : '';
     }
   }
 
@@ -108,7 +108,7 @@ App.views.discover = (function () {
     // 每次都读最新密钥：在「设置」里改了密钥后，不用重进页面也能生效
     return App.db.getSettings().then(s => {
       state.key = s.tmdbApiKey || '';
-      if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览电影库，去「设置」填写'); return; }
+      if (!state.key) { renderMsg('需要 TMDB 密钥才能浏览影音库，去「设置」填写'); return; }
       // 追加时若上一次还在飞，直接忽略，避免同一页被重复拉、page 被搞乱
       if (append && state.loading) return;
       const my = ++reqSeq;          // 本次请求编号
@@ -166,10 +166,9 @@ App.views.discover = (function () {
   function renderMsg(msg, retry) {
     const box = document.getElementById('discGrid');
     if (box) {
-      box.innerHTML = `<div class="empty"><div class="big">🎬</div>${msg}`
+      box.innerHTML = `<div class="empty"><div class="big">${App.util.icon(state.mediaType === 'tv' ? 'tv' : 'film', { size: 44, sw: 1.4 })}</div>${msg}`
         + (retry ? `<div style="margin-top:12px"><button class="btn sm primary" id="discMsgRetry">重新加载</button></div>` : '')
         + `</div>`;
-      const im = box.querySelector('.big'); if (im) im.textContent = state.mediaType === 'tv' ? '📺' : '🎬';
       if (retry) {
         const b = document.getElementById('discMsgRetry');
         if (b) b.onclick = retry;
@@ -206,7 +205,7 @@ App.views.discover = (function () {
       const over = m.overview ? (m.overview.length > 46 ? m.overview.slice(0, 46) + '…' : m.overview) : '暂无简介';
       return `
       <div class="result-row ${added ? 'added' : ''}" data-tmdb="${m.tmdbId}" data-title="${App.util.escapeHtml(m.title)}" data-year="${m.year}" data-poster="${App.util.escapeHtml(m.poster)}" data-over="${App.util.escapeHtml(m.overview)}">
-        ${m.poster ? `<img class="sr-poster" loading="lazy" src="${m.poster}" onerror="this.style.visibility='hidden'">` : `<div class="sr-poster ph">🎬</div>`}
+        ${m.poster ? `<img class="sr-poster" loading="lazy" src="${m.poster}" onerror="this.style.visibility='hidden'">` : `<div class="sr-poster ph">${App.util.icon('film', { size: 20, sw: 1.5 })}</div>`}
         <div class="sr-info">
           <div class="sr-title">${App.util.escapeHtml(m.title)} <span class="sr-year">${m.year || ''}</span></div>
           <div class="sr-over">${App.util.escapeHtml(over)}</div>
@@ -219,7 +218,7 @@ App.views.discover = (function () {
       const addBtn = r.querySelector('.sr-add');
       if (addBtn) addBtn.onclick = (e) => {
         e.stopPropagation();
-        if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         const seed = { tmdbId: r.dataset.tmdb, title: r.dataset.title, poster: r.dataset.poster, year: r.dataset.year, overview: r.dataset.over };
         const markAdded = () => { r.classList.add('added'); const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入'; };
         const isTv = state.mediaType === 'tv';
@@ -241,7 +240,7 @@ App.views.discover = (function () {
       };
       // 点行身：进弹窗补全日期/评分（资料更全）
       r.onclick = () => {
-        if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         if (App.views && App.views.list && App.views.list.quickAdd) {
           App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over, mediaType: state.mediaType === 'tv' ? 'tv' : 'movie' }, true);
         }
@@ -293,13 +292,13 @@ App.views.discover = (function () {
     mask.className = 'modal-mask';
     mask.innerHTML = `
       <div class="modal">
-        <h3>加入我的${isTv ? '剧集库' : '电影库'}</h3>
+        <h3>加入我的${isTv ? '剧集库' : '影音库'}</h3>
         <div class="preview">
-          ${seed.poster ? `<img src="${seed.poster}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">${isTv ? '📺' : '🎬'}</div>`}
+          ${seed.poster ? `<img src="${seed.poster}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted)">${App.util.icon(isTv ? 'tv' : 'film', { size: 28, sw: 1.5 })}</div>`}
           <div><div style="font-weight:600">${App.util.escapeHtml(seed.title || '')}</div><div class="muted">${seed.year || ''}</div></div>
         </div>
         <div class="field"><label>观影时间（首刷，可留空稍后补）</label><input type="date" id="qaDate" value=""></div>
-        <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 🤔 记不清具体哪天了</label>
+        <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 记不清具体哪天了</label>
         <div class="field" id="qaNoteWrap" style="display:none;margin-top:8px"><label>大概什么时候？（选填）</label><input type="text" id="qaNote" placeholder="如 2020 / 大学时"></div>
         ${isTv ? `
         <div class="field tv-add">
@@ -308,7 +307,7 @@ App.views.discover = (function () {
             <span>第</span><button type="button" class="stp" id="qaSMinus">−</button><span class="stp-val" id="qaS">1</span><button type="button" class="stp" id="qaSPlus">＋</button>
             <span>季 · 第</span><button type="button" class="stp" id="qaEMinus">−</button><span class="stp-val" id="qaE">0</span><button type="button" class="stp" id="qaEPlus">＋</button><span>集</span>
           </div>
-          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> ✅ 已经看完</label>
+          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> 已经看完</label>
         </div>` : ''}
         <div class="field"><label>快速评分（可留空，进详情再评）</label><div class="stars" id="qaStars"></div></div>
         <div style="display:flex;gap:10px;margin-top:6px">
@@ -342,7 +341,7 @@ App.views.discover = (function () {
         opts.tv = { season: parseInt(s.textContent, 10) || 1, episode: parseInt(e.textContent, 10) || 0, completed: !!(done && done.checked), totalEpisodes: 0, totalSeasons: 0, seasons: [] };
       }
       const rec = makeRecord(seed, opts);
-      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入我的' + (isTv ? '剧集库' : '电影库') + ' 🎉'); App.audio.sfx('success'); reload().then(renderGrid); });
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入我的' + (isTv ? '剧集库' : '影音库') + ''); App.audio.sfx('success'); reload().then(renderGrid); });
       if (seed.tmdbId && state.key) {
         const enricher = isTv ? App.tmdb.tvDetails(seed.tmdbId, state.key) : App.tmdb.details(seed.tmdbId, state.key);
         enricher.then(d => {
@@ -355,7 +354,7 @@ App.views.discover = (function () {
     mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
   }
 
-  // 批量加入：多选的电影一次性建记录（仅基础字段，后续在「我的电影库」补心得）
+  // 批量加入：多选的电影一次性建记录（仅基础字段，后续在「我的影音库」补心得）
   function batchAdd() {
     const picks = state.movies.filter(m => state.selected.has(String(m.tmdbId)) && !inLibrary(m));
     if (!picks.length) { App.util.toast('没有可加入的新' + (state.mediaType === 'tv' ? '剧集' : '电影')); return; }
@@ -366,7 +365,7 @@ App.views.discover = (function () {
       if (i >= picks.length) {
         state.selected.clear();   // 清零已选计数，保持在多选模式继续选择
         updateBatch();
-        App.util.toast('已加入 ' + ok + (isTv ? ' 部剧集' : ' 部') + '，继续选择或点「完成」退出 🎉');
+        App.util.toast('已加入 ' + ok + (isTv ? ' 部剧集' : ' 部') + '，继续选择或点「完成」退出');
         App.audio.sfx('success');
         reload().then(renderGrid);
         return;
@@ -514,7 +513,7 @@ App.views.discover = (function () {
     for (let k = 0; k < WALL_N; k++) {
       const c = document.createElement('div');
       c.className = 'gfx-card';
-      c.innerHTML = '<img alt=""><div class="gfx-ph" hidden>🎬</div><span class="added-badge" hidden>已加入</span>';
+      c.innerHTML = '<img alt=""><div class="gfx-ph" hidden>' + App.util.icon('film', { size: 30, sw: 1.5 }) + '</div><span class="added-badge" hidden>已加入</span>';
       applyVisual(c, k - WALL_MID);
       wall.appendChild(c);
       wallCards.push(c);
@@ -758,13 +757,13 @@ App.views.discover = (function () {
     root.innerHTML = `
       <div class="view-block search-wrap">
         <div class="media-toggle">
-          <button class="mt-btn ${!isTv ? 'active' : ''}" data-mt="movie">🎬 电影</button>
-          <button class="mt-btn ${isTv ? 'active' : ''}" data-mt="tv">📺 剧集</button>
+          <button class="mt-btn ${!isTv ? 'active' : ''}" data-mt="movie">${App.util.icon('film', { size: 15 })} 电影</button>
+          <button class="mt-btn ${isTv ? 'active' : ''}" data-mt="tv">${App.util.icon('tv', { size: 15 })} 剧集</button>
         </div>
         <div class="search-bar">
-          <span class="ico">🔍</span>
+          ${App.util.icon('search', { size: 18 })}
           <input id="discSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="${isTv ? '搜剧集名…' : '搜电影名…'}">
-          <span class="search-clear" id="discClear" style="display:none">✕</span>
+          <span class="search-clear" id="discClear" style="display:none">${App.util.icon('close', { size: 15 })}</span>
         </div>
         <div class="disc-backdrop" id="discBackdrop" hidden></div>
         <div class="search-results disc-results" id="discResults"></div>
@@ -776,7 +775,7 @@ App.views.discover = (function () {
           <div class="gfx-subrow">
             <button class="gfx-arr" id="gfxPrev" title="上一部">‹</button>
             <span id="gfxYear"></span>
-            <span class="gfx-added" id="gfxAdded" style="display:none">已加入 ✓</span>
+            <span class="gfx-added" id="gfxAdded" style="display:none">已加入</span>
             <span id="gfxCount"></span>
             <button class="gfx-arr" id="gfxNext" title="下一部">›</button>
           </div>
@@ -793,7 +792,7 @@ App.views.discover = (function () {
         <div class="genre-bar" id="discYears"></div>
       </div>
       <div class="view-block" style="display:flex;align-items:center;justify-content:space-between;margin:2px 0 8px">
-        <div class="section-title" style="margin:0"><span id="discSectionTitle">${isTv ? '剧集库' : '电影库'}</span> <span class="hint" id="discKindHint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
+        <div class="section-title" style="margin:0"><span id="discSectionTitle">${isTv ? '剧集' : '电影'}</span> <span class="hint" id="discKindHint">${state.query ? '搜索结果' : kindName[state.kind]}</span></div>
         <button class="btn sm" id="discMulti">多选</button>
       </div>
       <div id="discGrid" class="movie-grid discover"></div>
@@ -825,7 +824,7 @@ App.views.discover = (function () {
       const clr = root.querySelector('#discClear'); if (clr) clr.style.display = 'none';
       root.querySelectorAll('.seg-btn').forEach(x => x.classList.toggle('active', x.dataset.kind === 'popular'));
       const hint = root.querySelector('#discKindHint'); if (hint) hint.textContent = kindName['popular'];
-      const st = root.querySelector('#discSectionTitle'); if (st) st.textContent = isNowTv ? '剧集库' : '电影库';
+      const st = root.querySelector('#discSectionTitle'); if (st) st.textContent = isNowTv ? '剧集' : '电影';
       const kindHint = root.querySelector('#discKindHint');
       if (state.selecting) { state.selected.clear(); exitSelect(); }
       loadList('popular', 1, false);
@@ -893,7 +892,7 @@ App.views.discover = (function () {
         const id = target.dataset.id;
         if (!state.selecting) enterSelect();
         const fresh = box.querySelector('.movie-card.disc[data-id="' + (window.CSS && CSS.escape ? CSS.escape(id) : id) + '"]');
-        if (fresh && fresh.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+        if (fresh && fresh.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         if (fresh && !state.selected.has(id)) {
           state.selected.add(id); fresh.classList.add('sel');
           const ck = fresh.querySelector('.check'); if (ck) ck.classList.add('on');
