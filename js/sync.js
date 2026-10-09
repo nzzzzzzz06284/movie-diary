@@ -337,7 +337,9 @@ App.sync = (function () {
       try { const b = await r.json(); if (b && b.message) msg = b.message; } catch (e) {}
       if (r.status === 401) return '❌ 令牌无效：' + (msg || 'GitHub 拒绝了这个令牌') + '（与网络/中继无关，是令牌本身问题——请确认复制的是完整 ghp_/github_pat_ 整串，且未过期、未撤销）';
       if (r.status === 403) return '❌ 权限不足(403)：' + (msg || '令牌没有该仓库权限') + '｜经典 ghp_ 需勾 repo；Fine-grained 需在 Contents 设 Read and write 并重新生成';
-      if (r.status === 404) return '❌ 找不到仓库(404)：仓库名需为 用户名/仓库名、且已创建、与令牌同账号';
+      let extra404 = '';
+      try { const tk = r.headers.get('x-relay-token'); if (proxy && tk === 'absent') extra404 = '｜中转(Worker)未收到令牌，你部署的很可能是旧版中转——请更新为读取 ?t= 的新版（访问中转地址应显示 relay v2.1）'; } catch (e) {}
+      if (r.status === 404) return '❌ 找不到仓库(404)：仓库名需为 用户名/仓库名、且已创建、与令牌同账号' + extra404;
       return '❌ 错误 ' + r.status + (msg ? '：' + msg : '') + '（' + lastVia + '）';
     } catch (e) {
       const detail = (e && e.message) ? e.message : ('' + e);
