@@ -119,6 +119,9 @@ App.sync = (function () {
   function ghCreds(s) { return { token: (s.ghToken || '').trim(), repo: (s.ghRepo || '').trim(), branch: ghBranch(s), path: ghPath(s) }; }
   // 服务商：'gitee'（国内直连、无需 VPN/中继，推荐）或 'github'（需能访问 api.github.com）
   function ghProvider(s) { return ((s && s.ghProvider) || 'gitee').trim(); }
+  // 仓库/路径里的 '/' 是路径分隔符，必须原样保留；逐段编码，避免整段被编码成 %2F 导致 404
+  function encRepo(repo) { return (repo || '').trim().split('/').filter(Boolean).map(encodeURIComponent).join('/'); }
+  function encPath(p) { return (p || '').trim().split('/').map(encodeURIComponent).join('/'); }
 
   // 中转中继（可选）：把请求转发到 GitHub 并带回 CORS 头，规避国内网络对 api.github.com 跨域预检的拦截。
   // 默认留空走直连；若已配置中继地址（如自建 Cloudflare Worker），直连失败自动改走中继。中继会原样转发 Authorization 头。
@@ -162,18 +165,18 @@ App.sync = (function () {
   async function cloudReadFile(s) {
     const g = ghCreds(s);
     if (ghProvider(s) === 'gitee') {
-      let u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '/contents/' + encodeURIComponent(g.path) + '?access_token=' + encodeURIComponent(g.token);
+      let u = 'https://gitee.com/api/v5/repos/' + encRepo(g.repo) + '/contents/' + encPath(g.path) + '?access_token=' + encodeURIComponent(g.token);
       if (g.branch) u += '&ref=' + encodeURIComponent(g.branch);
       return await fetch(u, { headers: { Accept: 'application/json' } });
     }
-    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+    const url = `https://api.github.com/repos/${encRepo(g.repo)}/contents/${encPath(g.path)}?ref=${encodeURIComponent(g.branch)}`;
     return await ghFetch(url, { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } }, g.token, ghProxy(s));
   }
 
   async function cloudWriteFile(s, contentB64, sha) {
     const g = ghCreds(s);
     if (ghProvider(s) === 'gitee') {
-      const u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '/contents/' + encodeURIComponent(g.path);
+      const u = 'https://gitee.com/api/v5/repos/' + encRepo(g.repo) + '/contents/' + encPath(g.path);
       const form = new URLSearchParams();
       form.set('access_token', g.token);
       form.set('content', contentB64);
@@ -182,7 +185,7 @@ App.sync = (function () {
       if (sha) form.set('sha', sha);
       return await fetch(u, { method: sha ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: form.toString() });
     }
-    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+    const url = `https://api.github.com/repos/${encRepo(g.repo)}/contents/${encPath(g.path)}?ref=${encodeURIComponent(g.branch)}`;
     const body = { message: 'movie-diary auto sync', content: contentB64, branch: ghBranch(s) };
     if (sha) body.sha = sha;
     return await ghFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }, g.token, ghProxy(s));
@@ -333,8 +336,8 @@ App.sync = (function () {
       }
     };
     lines.push(await probe('① 无头GET rate_limit', 'https://api.github.com/rate_limit'));
-    lines.push(await probe('② 带Authorization头', 'https://api.github.com/repos/' + encodeURIComponent(g.repo), { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } }));
-    lines.push(await probe('③ 用?access_token=参数', 'https://api.github.com/repos/' + encodeURIComponent(g.repo) + '?access_token=' + encodeURIComponent(g.token)));
+    lines.push(await probe('② 带Authorization头', 'https://api.github.com/repos/' + encRepo(g.repo), { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } }));
+    lines.push(await probe('③ 用?access_token=参数', 'https://api.github.com/repos/' + encRepo(g.repo) + '?access_token=' + encodeURIComponent(g.token)));
     return lines.join('\n');
   }
 
@@ -346,7 +349,7 @@ App.sync = (function () {
 
     // —— Gitee（国内直连，无需中继/预检）——
     if (ghProvider(s) === 'gitee') {
-      const u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '?access_token=' + encodeURIComponent(g.token);
+      const u = 'https://gitee.com/api/v5/repos/' + encRepo(g.repo) + '?access_token=' + encodeURIComponent(g.token);
       try {
         const r = await fetch(u, { headers: { Accept: 'application/json' } });
         if (r.ok) { const j = await r.json(); return '✅ 连接成功（Gitee 码云）：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）'); }
@@ -361,7 +364,7 @@ App.sync = (function () {
     }
 
     // —— GitHub（需要能访问 api.github.com；可配中继）——
-    const base = 'https://api.github.com/repos/' + encodeURIComponent(g.repo);
+    const base = 'https://api.github.com/repos/' + encRepo(g.repo);
     const authHeaders = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     try {
       // 先直连；被网络/CORS 预检拦截则自动走中继（若已配置）
