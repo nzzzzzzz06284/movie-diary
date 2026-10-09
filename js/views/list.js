@@ -1,9 +1,9 @@
-// 视图：电影库（首页）—— 搜索栏（爱奇艺式自动联想）+ 本地库列表 + 筛选
+// 视图：影音库（首页）—— 搜索栏（爱奇艺式自动联想）+ 本地库列表 + 筛选
 window.App = window.App || {};
 App.views = App.views || {};
 
 App.views.list = (function () {
-  let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set(), media: 'all' };
+  let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set(), media: 'all', tvFilter: 'all' };
   let records = [];
   let key = '';
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
@@ -11,7 +11,7 @@ App.views.list = (function () {
 
   function posterBlock(poster) {
     if (poster) return `<div class="poster"><img src="${App.util.escapeHtml(poster)}" onerror="this.parentNode.classList.add('ph');this.remove();" alt=""></div>`;
-    return `<div class="poster ph">🎬</div>`;
+    return `<div class="poster ph">${App.util.icon('film', { size: 26, sw: 1.5 })}</div>`;
   }
 
   function debounce(fn, ms) {
@@ -22,7 +22,17 @@ App.views.list = (function () {
     const box = document.getElementById('library');
     if (!box) return;
     let list = records.slice();
-    if (state.media !== 'all') list = list.filter(r => (r.mediaType || 'movie') === state.media);
+    if (state.media === 'all') {
+      // 「全部」不显示"想看"的剧集（想看只在 剧集·想看 里出现）
+      list = list.filter(r => !(App.util.isTv(r) && App.util.tvStatus(r) === 'want'));
+    } else if (state.media === 'movie') {
+      list = list.filter(r => !App.util.isTv(r));
+    } else {
+      list = list.filter(r => App.util.isTv(r));
+      list = state.tvFilter === 'all'
+        ? list.filter(r => App.util.tvStatus(r) !== 'want')
+        : list.filter(r => App.util.tvStatus(r) === state.tvFilter);
+    }
     if (state.query) {
       const q = state.query.toLowerCase();
       list = list.filter(r => (r.title || '').toLowerCase().includes(q)
@@ -34,26 +44,38 @@ App.views.list = (function () {
     if (state.tags.size) list = list.filter(r => (r.tags || []).some(t => state.tags.has(t)));
 
     if (!list.length) {
-      const base = state.query || state.tags.size || state.year || state.media !== 'all';
-      box.innerHTML = `<div class="empty"><div class="big">${state.media === 'tv' ? '📺' : '🎞️'}</div>${base ? '没有匹配的' + (state.media === 'tv' ? '剧集' : '电影') : '还没有电影，去搜索或点右下角 ＋ 添加'}</div>`;
+      const base = state.query || state.tags.size || state.year || state.media !== 'all' || state.tvFilter !== 'all';
+      const word = state.media === 'tv' ? '剧集' : (state.media === 'movie' ? '电影' : '影片');
+      box.innerHTML = `<div class="empty"><div class="big">${App.util.icon(state.media === 'tv' ? 'tv' : 'film', { size: 44, sw: 1.4 })}</div>${base ? '没有匹配的' + word : '还没有记录，去搜索或点右下角 ＋ 添加'}</div>`;
       return;
     }
     const sel = state.selSet;
     box.innerHTML = `<div class="movie-grid ${state.selecting ? 'selecting' : ''}">` + list.map(r => {
       const isSel = sel.has(r.id);
-      const tvMeta = App.util.tvCardMeta(r);          // 📺 S1E5 / 📺 想看
-      const done = App.util.tvCompleted(r);           // ✅ 已看完
-      const mediaTag = (r.mediaType || 'movie') === 'tv' ? '<span class="media-tag tv">📺剧集</span>' : '';
+      const tv = App.util.isTv(r);
+      const st = App.util.tvStatus(r);
+      let statusRow = '';
+      if (tv) {
+        if (st === 'watching') {
+          const pct = App.util.tvProgressPct(r);
+          statusRow = `<div class="tv-prog">
+          ${pct != null ? `<div class="tv-prog-bar"><i style="width:${pct}%"></i></div>` : ''}
+          <div class="tv-status watching">${App.util.icon('play', { size: 11, sw: 2.2 })}在看 · ${App.util.escapeHtml(App.util.tvProgressText(r))}</div>
+        </div>`;
+        } else if (st === 'watched') {
+          statusRow = `<div class="tv-status watched">${App.util.icon('check', { size: 12, sw: 2 })}已看完</div>`;
+        } else {
+          statusRow = `<div class="tv-status want">${App.util.icon('bookmark', { size: 12, sw: 2 })}想看</div>`;
+        }
+      }
       return `
       <div class="movie-card ${state.selecting ? 'selectable' : ''} ${isSel ? 'sel' : ''}" data-id="${r.id}">
         ${state.selecting ? '<span class="check ' + (isSel ? 'on' : '') + '"></span>' : ''}
-        ${done ? '<span class="badge done-badge">✅已看完</span>' : ''}
         ${posterBlock(r.posterUrl)}
         <div class="body">
           <p class="name">${App.util.escapeHtml(r.title)}</p>
           <div class="meta"><span>${App.util.dateShort(App.util.latestWatch(r)) || (App.util.entries(r).some(e => e.dateUnknown) ? '记不清了' : '')}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? `<span class="rate-num">${App.util.ratingText(App.util.latestRating(r))}</span>` : ''}</div>
-          ${tvMeta ? `<div class="meta"><span class="tv-badge">${tvMeta}</span></div>` : ''}
-          ${mediaTag ? `<div class="meta">${mediaTag}</div>` : ''}
+          ${statusRow}
         </div>
       </div>`;
     }).join('') + `</div>`;
@@ -112,7 +134,7 @@ App.views.list = (function () {
       const over = m.overview ? (m.overview.length > 46 ? m.overview.slice(0, 46) + '…' : m.overview) : '暂无简介';
       return `
       <div class="result-row ${added ? 'added' : ''}" data-tmdb="${m.tmdbId}" data-title="${App.util.escapeHtml(m.title)}" data-year="${m.year}" data-poster="${App.util.escapeHtml(m.poster)}" data-over="${App.util.escapeHtml(m.overview)}">
-        ${m.poster ? `<img class="sr-poster" src="${m.poster}" onerror="this.style.visibility='hidden'">` : `<div class="sr-poster ph">🎬</div>`}
+        ${m.poster ? `<img class="sr-poster" src="${m.poster}" onerror="this.style.visibility='hidden'">` : `<div class="sr-poster ph">${App.util.icon('film', { size: 20, sw: 1.5 })}</div>`}
         <div class="sr-info">
           <div class="sr-title">${App.util.escapeHtml(m.title)} <span class="sr-year">${m.year || ''}</span></div>
           <div class="sr-over">${App.util.escapeHtml(over)}</div>
@@ -121,7 +143,7 @@ App.views.list = (function () {
       </div>`;
     }).join('');
     box.querySelectorAll('.result-row').forEach(r => r.onclick = () => {
-      if (r.classList.contains('added')) { App.util.toast('这部已在你的电影库'); return; }
+      if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
       quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over }, true);
     });
   }
@@ -146,13 +168,13 @@ App.views.list = (function () {
     mask.className = 'modal-mask';
     mask.innerHTML = `
       <div class="modal">
-        <h3>加入${isTv ? '剧集库' : '电影库'}</h3>
+        <h3>加入${isTv ? '剧集库' : '影音库'}</h3>
         <div class="preview">
-          ${seed.posterUrl ? `<img src="${seed.posterUrl}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center">${isTv ? '📺' : '🎬'}</div>`}
+          ${seed.posterUrl ? `<img src="${seed.posterUrl}" onerror="this.style.display='none'">` : `<div style="width:70px;height:105px;background:var(--bg-soft);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted)">${App.util.icon(isTv ? 'tv' : 'film', { size: 28, sw: 1.5 })}</div>`}
           <div><div style="font-weight:600">${App.util.escapeHtml(seed.title || '')}</div><div class="muted">${seed.year || ''}</div></div>
         </div>
         <div class="field"><label>观影时间（首刷）</label><input type="date" id="qaDate" value="${App.util.today()}"></div>
-        <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 🤔 记不清具体哪天了</label>
+        <label class="unk-toggle"><input type="checkbox" id="qaUnknown"> 记不清具体哪天了</label>
         <div class="field" id="qaNoteWrap" style="display:none;margin-top:8px"><label>大概什么时候？（选填，如 2020 / 大学时）</label><input type="text" id="qaNote" placeholder="可留空"></div>
         ${isTv ? `
         <div class="field tv-add">
@@ -161,12 +183,12 @@ App.views.list = (function () {
             <span>第</span><button type="button" class="stp" id="qaSMinus">−</button><span class="stp-val" id="qaS">1</span><button type="button" class="stp" id="qaSPlus">＋</button>
             <span>季 · 第</span><button type="button" class="stp" id="qaEMinus">−</button><span class="stp-val" id="qaE">0</span><button type="button" class="stp" id="qaEPlus">＋</button><span>集</span>
           </div>
-          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> ✅ 已经看完</label>
+          <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="qaDone"> 已经看完</label>
         </div>` : ''}
         <div class="field"><label>快速评分（可留空，进详情再评）</label><div class="stars" id="qaStars"></div></div>
         <div style="display:flex;gap:10px;margin-top:6px">
           <button class="btn block" id="qaCancel">取消</button>
-          <button class="btn primary block" id="qaOk">加入${isTv ? '剧集库' : '电影库'}</button>
+          <button class="btn primary block" id="qaOk">加入${isTv ? '剧集库' : '影音库'}</button>
         </div>
       </div>`;
     document.body.appendChild(mask);
@@ -212,7 +234,7 @@ App.views.list = (function () {
         const s = mask.querySelector('#qaS'), e = mask.querySelector('#qaE'), done = mask.querySelector('#qaDone');
         rec.tv = { season: parseInt(s.textContent, 10) || 1, episode: parseInt(e.textContent, 10) || 0, completed: !!(done && done.checked), totalEpisodes: 0, totalSeasons: 0, seasons: [] };
       }
-      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入' + (isTv ? '剧集库' : '电影库') + ' 🎉'); App.audio.sfx('success'); App.router.go('#/detail/' + r.id); });
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入' + (isTv ? '剧集库' : '影音库')); App.audio.sfx('success'); App.router.go('#/detail/' + r.id); });
       // 点选时自动补全导演 / 演员，确保资料正确
       if (enrich && seed.tmdbId && key) {
         const enricher = isTv ? App.tmdb.tvDetails(seed.tmdbId, key) : App.tmdb.details(seed.tmdbId, key);
@@ -256,9 +278,9 @@ App.views.list = (function () {
     root.innerHTML = `
       <div class="view-block search-wrap">
         <div class="search-bar">
-          <span class="ico">🔍</span>
-          <input id="listSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜我库里的电影…">
-          <span class="search-clear" id="listClear" style="display:none">✕</span>
+          ${App.util.icon('search', { size: 18 })}
+          <input id="listSearch" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" placeholder="搜我库里的影音…">
+          <span class="search-clear" id="listClear" style="display:none">${App.util.icon('close', { size: 15 })}</span>
         </div>
         <div class="disc-backdrop" id="listBackdrop" hidden></div>
         <div class="search-results disc-results" id="searchResults"></div>
@@ -266,10 +288,16 @@ App.views.list = (function () {
       <div class="view-block">
         <div class="seg media-seg">
           <button class="seg-btn ${state.media === 'all' ? 'active' : ''}" data-media="all">全部</button>
-          <button class="seg-btn ${state.media === 'movie' ? 'active' : ''}" data-media="movie">🎬 电影</button>
-          <button class="seg-btn ${state.media === 'tv' ? 'active' : ''}" data-media="tv">📺 剧集</button>
+          <button class="seg-btn ${state.media === 'movie' ? 'active' : ''}" data-media="movie">${App.util.icon('film', { size: 14 })}电影</button>
+          <button class="seg-btn ${state.media === 'tv' ? 'active' : ''}" data-media="tv">${App.util.icon('tv', { size: 14 })}剧集</button>
         </div>
-        <div class="section-title" style="margin-top:10px">我的电影库 <span class="hint" id="listCountHint">${records.length} 部</span>
+        ${state.media === 'tv' ? `<div class="seg tv-status-seg" id="tvStatusSeg" style="margin-top:8px">
+          <button class="seg-btn ${state.tvFilter === 'all' ? 'active' : ''}" data-tvf="all">全部</button>
+          <button class="seg-btn ${state.tvFilter === 'watched' ? 'active' : ''}" data-tvf="watched">看过</button>
+          <button class="seg-btn ${state.tvFilter === 'watching' ? 'active' : ''}" data-tvf="watching">在看</button>
+          <button class="seg-btn ${state.tvFilter === 'want' ? 'active' : ''}" data-tvf="want">想看</button>
+        </div>` : ''}
+        <div class="section-title" style="margin-top:10px">我的影音库 <span class="hint" id="listCountHint">${records.length} 部</span>
           <span class="ml-auto" style="display:flex;gap:8px;margin-left:auto">
             <button class="btn sm ghost" id="listDup">清除重复</button>
             <button class="btn sm" id="listMulti">多选删除</button>
@@ -311,10 +339,15 @@ App.views.list = (function () {
     if (lbd) lbd.onclick = () => { const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } lbd.hidden = true; };
     const lcl = document.getElementById('listClear');
     if (lcl) lcl.onclick = () => { const i = document.getElementById('listSearch'); if (i) i.value = ''; state.query = ''; lcl.style.display = 'none'; const b = document.getElementById('searchResults'); if (b) { b.classList.remove('open'); b.innerHTML = ''; } if (lbd) lbd.hidden = true; renderLibrary(); };
-    // 全部 / 电影 / 剧集 筛选
+    // 全部 / 电影 / 剧集 筛选（切到剧集时再显示 全部/看过/在看/想看 子分类）
     root.querySelectorAll('.media-seg .seg-btn').forEach(b => b.onclick = () => {
       state.media = b.dataset.media;
-      root.querySelectorAll('.media-seg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
+      if (state.media !== 'tv') state.tvFilter = 'all';
+      render(param, root);
+    });
+    root.querySelectorAll('#tvStatusSeg .seg-btn').forEach(b => b.onclick = () => {
+      state.tvFilter = b.dataset.tvf;
+      root.querySelectorAll('#tvStatusSeg .seg-btn').forEach(x => x.classList.toggle('active', x === b));
       renderLibrary();
     });
     bindLongPressLibrary(root);
@@ -363,7 +396,7 @@ App.views.list = (function () {
         if (i >= total) {
           exitMulti();
           reload().then(() => { renderFilters(); renderLibrary(); });
-          App.util.toast('已删除 ' + total + ' 部 🗑️');
+          App.util.toast('已删除 ' + total + ' 部');
           App.audio.sfx('success');
           return;
         }
@@ -378,14 +411,14 @@ App.views.list = (function () {
       const k = (r.tmdbId && r.tmdbId !== '') ? ('t' + r.tmdbId) : ('n' + (r.title || '').toLowerCase());
       if (seen.has(k)) dup.push(r.id); else seen.add(k);
     });
-    if (!dup.length) { App.util.toast('没有发现重复电影 🎉'); return; }
-    confirmModal(`发现 ${dup.length} 部重复电影，将保留第一部、删除其余重复项。确定清除？`).then(ok => {
+    if (!dup.length) { App.util.toast('没有发现重复影片'); return; }
+    confirmModal(`发现 ${dup.length} 部重复影片，将保留第一部、删除其余重复项。确定清除？`).then(ok => {
       if (!ok) return;
       let i = 0; const total = dup.length;
       (function del() {
         if (i >= total) {
           reload().then(() => { renderFilters(); renderLibrary(); });
-          App.util.toast('已清除 ' + total + ' 部重复 🎉');
+          App.util.toast('已清除 ' + total + ' 部重复');
           App.audio.sfx('success');
           return;
         }
@@ -405,7 +438,7 @@ App.views.list = (function () {
         <h3>批量编辑（${ids.length} 部）</h3>
         <div class="muted" style="margin:-6px 0 12px">留空的项表示「不改」；填了就对选中电影统一生效。</div>
         <div class="field"><label>统一观影时间（都记这一次）</label><input type="date" id="beDate"></div>
-        <label class="unk-toggle" style="margin-bottom:10px"><input type="checkbox" id="beUnknown"> 🤔 这些时间都记不清了</label>
+        <label class="unk-toggle" style="margin-bottom:10px"><input type="checkbox" id="beUnknown"> 这些时间都记不清了</label>
         <div class="field"><label>统一评分（可留空）</label><div class="stars" id="beStars"></div></div>
         <div class="field"><label>统一加标签（多个用逗号分隔，可留空）</label><input type="text" id="beTags" placeholder="如：科幻,治愈"></div>
         <div style="display:flex;gap:10px;margin-top:6px">
@@ -460,7 +493,7 @@ App.views.list = (function () {
         mask.remove();
         exitMulti();
         return reload();
-      }).then(() => { renderFilters(); renderLibrary(); App.util.toast('已批量修改 ' + ids.length + ' 部 ✅'); App.audio.sfx('success'); })
+      }).then(() => { renderFilters(); renderLibrary(); App.util.toast('已批量修改 ' + ids.length + ' 部'); App.audio.sfx('success'); })
         .catch(() => App.util.toast('批量编辑失败，请重试'));
     };
     mask.onclick = (e) => { if (e.target === mask) mask.remove(); };
