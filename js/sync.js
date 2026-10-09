@@ -17,11 +17,13 @@ App.sync = (function () {
       const t = (p.get('synctoken') || '').trim();
       const r = (p.get('syncrepo') || '').trim();
       const px = (p.get('syncproxy') || '').trim();
+      const pv = (p.get('syncprovider') || '').trim();
       if (!t || !r) return;
       const s = await App.db.getSettings();
       s.ghToken = t; s.ghRepo = r;
+      if (pv) s.ghProvider = pv;
       if (px) s.ghProxy = px;
-      if (!s.ghBranch) s.ghBranch = 'main';
+      if (!s.ghBranch && ghProvider(s) === 'github') s.ghBranch = 'main';
       if (!s.ghPath) s.ghPath = 'movie-diary-data.json';
       await App.db.saveSettings(s);
       // 清掉 URL 里的令牌，避免泄露与重复触发
@@ -115,6 +117,8 @@ App.sync = (function () {
   function ghBranch(s) { return ((s && s.ghBranch) || 'main').trim() || 'main'; }
   // 读取并清洗配置：去掉复制粘贴带入的首尾空格/换行，避免 Authorization 头非法导致 fetch 抛「网络错误」
   function ghCreds(s) { return { token: (s.ghToken || '').trim(), repo: (s.ghRepo || '').trim(), branch: ghBranch(s), path: ghPath(s) }; }
+  // 服务商：'gitee'（国内直连、无需 VPN/中继，推荐）或 'github'（需能访问 api.github.com）
+  function ghProvider(s) { return ((s && s.ghProvider) || 'gitee').trim(); }
 
   // 中转中继（可选）：把请求转发到 GitHub 并带回 CORS 头，规避国内网络对 api.github.com 跨域预检的拦截。
   // 默认留空走直连；若已配置中继地址（如自建 Cloudflare Worker），直连失败自动改走中继。中继会原样转发 Authorization 头。
@@ -154,6 +158,36 @@ App.sync = (function () {
     }
   }
 
+  // —— 统一云端读写：按服务商分派。Gitee 走国内直连、令牌走 URL/表单参数，无需 VPN、无需中继、不触发预检 ——
+  async function cloudReadFile(s) {
+    const g = ghCreds(s);
+    if (ghProvider(s) === 'gitee') {
+      let u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '/contents/' + encodeURIComponent(g.path) + '?access_token=' + encodeURIComponent(g.token);
+      if (g.branch) u += '&ref=' + encodeURIComponent(g.branch);
+      return await fetch(u, { headers: { Accept: 'application/json' } });
+    }
+    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+    return await ghFetch(url, { headers: { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' } }, g.token, ghProxy(s));
+  }
+
+  async function cloudWriteFile(s, contentB64, sha) {
+    const g = ghCreds(s);
+    if (ghProvider(s) === 'gitee') {
+      const u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '/contents/' + encodeURIComponent(g.path);
+      const form = new URLSearchParams();
+      form.set('access_token', g.token);
+      form.set('content', contentB64);
+      form.set('message', 'movie-diary auto sync');
+      if (g.branch) form.set('branch', g.branch);
+      if (sha) form.set('sha', sha);
+      return await fetch(u, { method: sha ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', Accept: 'application/json' }, body: form.toString() });
+    }
+    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
+    const body = { message: 'movie-diary auto sync', content: contentB64, branch: ghBranch(s) };
+    if (sha) body.sha = sha;
+    return await ghFetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' }, body: JSON.stringify(body) }, g.token, ghProxy(s));
+  }
+
   function utf8ToBase64(str) {
     const bytes = new TextEncoder().encode(str);
     let bin = '';
@@ -185,33 +219,26 @@ App.sync = (function () {
   async function cloudPush() {
     const s = await App.db.getSettings();
     if (!ghEnabled(s)) return;
-    const g = ghCreds(s);
-    const proxy = ghProxy(s);
     if (cloudBusy) { cloudPending = true; return; }
     cloudBusy = true;
     try {
       const payload = await buildPayload();
       const content = utf8ToBase64(JSON.stringify(payload));
-      const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
-      const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
 
       // 取当前文件 sha（用于更新；404 表示首次创建）
       let sha = null;
       try {
-        const r = await ghFetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } }, g.token, proxy);
+        const r = await cloudReadFile(s);
         if (r.ok) { const j = await r.json(); sha = j.sha; }
         else if (r.status !== 404) { lastError = '读取云端失败 ' + r.status; return; }
       } catch (e) { lastError = '网络错误（读取）'; return; }
 
-      const body = { message: 'movie-diary auto sync', content, branch: ghBranch(s) };
-      if (sha) body.sha = sha;
-
-      let r = await ghFetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) }, g.token, proxy);
+      let r = await cloudWriteFile(s, content, sha);
       // 冲突（另一设备先推了）：重新取 sha 再试一次
       if (r.status === 409 && sha) {
         try {
-          const r2 = await ghFetch(url, { headers: { Authorization: headers.Authorization, Accept: headers.Accept } }, g.token, proxy);
-          if (r2.ok) { const j = await r2.json(); body.sha = j.sha; r = await ghFetch(url, { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, headers), body: JSON.stringify(body) }, g.token); }
+          const r2 = await cloudReadFile(s);
+          if (r2.ok) { const j = await r2.json(); r = await cloudWriteFile(s, content, j.sha); }
         } catch (e) { /* ignore */ }
       }
       if (r.ok) { lastPush = Date.now(); lastError = ''; }
@@ -255,16 +282,12 @@ App.sync = (function () {
 
   async function cloudPull() {
     const s = await App.db.getSettings();
-    if (!ghEnabled(s)) { App.util.toast('请先在设置里配置 GitHub 同步'); return false; }
-    const g = ghCreds(s);
-    const proxy = ghProxy(s);
-    const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
-    const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
+    if (!ghEnabled(s)) { App.util.toast('请先在设置里配置云端同步'); return false; }
     let r;
-    try { r = await ghFetch(url, { headers }, g.token, proxy); }
-    catch (e) { App.util.toast('网络错误，拉取失败（直连与代理都失败，确认 VPN 已开且能打开 api.github.com）'); return false; }
+    try { r = await cloudReadFile(s); }
+    catch (e) { App.util.toast('网络错误，拉取失败：' + ((e && e.message) || e)); return false; }
     if (!r.ok) {
-      if (r.status === 404) App.util.toast('GitHub 上还没有备份，先在有数据的设备同步一次');
+      if (r.status === 404) App.util.toast('云端还没有备份，先在有数据的设备同步一次');
       else App.util.toast('拉取失败：' + r.status);
       return false;
     }
@@ -286,11 +309,7 @@ App.sync = (function () {
       if (!ghEnabled(s)) return;
       const local = await App.db.getRecords();
       if (local.length) return; // 本机有数据就不覆盖
-      const g = ghCreds(s);
-      const proxy = ghProxy(s);
-      const url = `https://api.github.com/repos/${encodeURIComponent(g.repo)}/contents/${encodeURIComponent(g.path)}?ref=${encodeURIComponent(g.branch)}`;
-      const headers = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
-      const r = await ghFetch(url, { headers }, g.token, proxy);
+      const r = await cloudReadFile(s);
       if (!r.ok) return;
       const j = await r.json();
       const data = JSON.parse(base64ToUtf8(j.content));
@@ -324,6 +343,24 @@ App.sync = (function () {
     if (!ghEnabled(s)) return '请先填写令牌和仓库';
     const g = ghCreds(s);
     const proxy = ghProxy(s);
+
+    // —— Gitee（国内直连，无需中继/预检）——
+    if (ghProvider(s) === 'gitee') {
+      const u = 'https://gitee.com/api/v5/repos/' + encodeURIComponent(g.repo) + '?access_token=' + encodeURIComponent(g.token);
+      try {
+        const r = await fetch(u, { headers: { Accept: 'application/json' } });
+        if (r.ok) { const j = await r.json(); return '✅ 连接成功（Gitee 码云）：' + j.full_name + (j.private ? '（私有）' : '（公开，建议设为私有）'); }
+        let msg = ''; try { const b = await r.json(); if (b && b.message) msg = b.message; } catch (e) {}
+        if (r.status === 401) return '❌ 令牌无效(401)：' + (msg || 'Gitee 拒绝了这个令牌') + '（请重新复制完整令牌，或到 Gitee→设置→私人令牌 重新生成）';
+        if (r.status === 403) return '❌ 权限不足(403)：' + (msg || '令牌没有该仓库权限') + '（生成令牌时请勾选 projects 权限）';
+        if (r.status === 404) return '❌ 找不到仓库(404)：仓库名需为 用户名/仓库名、且已创建、与令牌同账号';
+        return '❌ 错误 ' + r.status + (msg ? '：' + msg : '');
+      } catch (e) {
+        return '❌ 网络错误：' + ((e && e.message) || e) + '（Gitee 在国内一般可直连，请检查网络）';
+      }
+    }
+
+    // —— GitHub（需要能访问 api.github.com；可配中继）——
     const base = 'https://api.github.com/repos/' + encodeURIComponent(g.repo);
     const authHeaders = { Authorization: 'Bearer ' + g.token, Accept: 'application/vnd.github+json' };
     try {
