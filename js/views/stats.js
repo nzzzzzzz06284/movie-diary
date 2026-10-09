@@ -4,11 +4,12 @@ App.views = App.views || {};
 
 App.views.stats = (function () {
   let records = [];
+  let media = 'all'; // all | movie | tv
 
   async function reload() { records = await App.db.getRecords(); }
 
   function hBars(data) {
-    if (!data.length) return '<div class="muted">还没有标签数据，去给电影打标签吧</div>';
+    if (!data.length) return '<div class="muted">还没有类型/标签数据，去给影片打标签吧</div>';
     const max = Math.max(...data.map(d => d.value), 1);
     return `<div style="display:flex;flex-direction:column;gap:9px">` + data.map(d => `
       <div style="display:flex;align-items:center;gap:8px;font-size:13px">
@@ -52,17 +53,21 @@ App.views.stats = (function () {
   function render(param, root) {
     const year = new Date().getFullYear();
     const yearStr = String(year);
+    // 电影 / 剧集分开统计
+    const list = media === 'all' ? records : records.filter(r => (App.util.isTv(r) ? 'tv' : 'movie') === media);
+    const scopeName = media === 'tv' ? '剧集' : (media === 'movie' ? '电影' : '影片');
+
     // 观影次数（含二刷三刷）：今年所有观影事件总数
-    const yearWatchEvents = records.reduce((s, r) =>
+    const yearWatchEvents = list.reduce((s, r) =>
       s + App.util.watchDates(r).filter(d => d.slice(0, 4) === yearStr).length, 0);
-    const rewatchedMovies = records.filter(r => App.util.watchCount(r) > 1).length;
-    const allEntries = records.flatMap(r => App.util.entries(r));
+    const rewatchedMovies = list.filter(r => App.util.watchCount(r) > 1).length;
+    const allEntries = list.flatMap(r => App.util.entries(r));
     const rated = allEntries.filter(e => e.rating > 0);
     const avg = rated.length ? (rated.reduce((s, e) => s + e.rating, 0) / rated.length).toFixed(1) : '—';
 
     // 观影偏好：优先用类型(genres)，没有类型才用标签
     const tagCount = {};
-    records.forEach(r => {
+    list.forEach(r => {
       const cats = (r.genres && r.genres.length) ? r.genres : (r.tags || []);
       cats.forEach(t => tagCount[t] = (tagCount[t] || 0) + 1);
     });
@@ -70,7 +75,7 @@ App.views.stats = (function () {
 
     // 按月趋势（今年，按每次观影事件统计）
     const months = Array(12).fill(0);
-    records.forEach(r => App.util.watchDates(r).forEach(d => {
+    list.forEach(r => App.util.watchDates(r).forEach(d => {
       if (d.slice(0, 4) === yearStr) { const m = parseInt(d.slice(5, 7), 10); if (m >= 1 && m <= 12) months[m - 1]++; }
     }));
 
@@ -78,26 +83,37 @@ App.views.stats = (function () {
     const dist = [1, 2, 3, 4, 5].map(i => ({ label: i + '★', value: rated.filter(r => r.rating === i).length }));
 
     root.innerHTML = `
+      <div class="seg media-seg" style="margin-bottom:12px">
+        <button class="seg-btn ${media === 'all' ? 'active' : ''}" data-media="all">全部</button>
+        <button class="seg-btn ${media === 'movie' ? 'active' : ''}" data-media="movie">${App.util.icon('film', { size: 14 })}电影</button>
+        <button class="seg-btn ${media === 'tv' ? 'active' : ''}" data-media="tv">${App.util.icon('tv', { size: 14 })}剧集</button>
+      </div>
+
       <div class="stat-cards">
         <div class="stat-card"><div class="num">${yearWatchEvents}</div><div class="lbl">${year}年观影·次</div></div>
         <div class="stat-card"><div class="num">${avg}</div><div class="lbl">平均评分</div></div>
-        <div class="stat-card"><div class="num">${records.length}</div><div class="lbl">累计电影</div></div>
+        <div class="stat-card"><div class="num">${list.length}</div><div class="lbl">累计${scopeName}</div></div>
       </div>
 
       <div class="view-block">
-        <div class="section-title">🎯 观影偏好 <span class="hint">看的类型多少 · 二刷${rewatchedMovies}部</span></div>
+        <div class="section-title">${App.util.icon('heart', { size: 16 })}观影偏好 <span class="hint">看的类型多少 · 二刷${rewatchedMovies}部</span></div>
         ${hBars(prefData)}
       </div>
 
       <div class="view-block">
-        <div class="section-title">📈 按月趋势 <span class="hint">${year}年</span></div>
-        ${records.length ? lineChart(months) : '<div class="muted">还没有数据</div>'}
+        <div class="section-title">${App.util.icon('trend', { size: 16 })}按月趋势 <span class="hint">${year}年</span></div>
+        ${list.length ? lineChart(months) : '<div class="muted">还没有数据</div>'}
       </div>
 
       <div class="view-block">
-        <div class="section-title">⭐ 评分分布</div>
+        <div class="section-title">${App.util.icon('star', { size: 16 })}评分分布</div>
         ${rated.length ? vBars(dist) : '<div class="muted">还没有评分</div>'}
       </div>`;
+
+    root.querySelectorAll('.media-seg .seg-btn').forEach(b => b.onclick = () => {
+      media = b.dataset.media;
+      render(param, root);
+    });
   }
 
   return { render, reload };
