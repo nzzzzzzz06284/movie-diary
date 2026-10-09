@@ -5,6 +5,7 @@ App.views = App.views || {};
 App.views.profile = (function () {
   let profile = null;
   let avatarUrl = null;
+  let media = 'all'; // all | movie | tv
 
   async function reload() {
     profile = await App.db.getKV('profile') || {};
@@ -13,14 +14,14 @@ App.views.profile = (function () {
     else avatarUrl = null;
   }
 
-  function statCards(records) {
-    const allE = records.flatMap(r => App.util.entries(r));
+  function statCards(list, scopeName) {
+    const allE = list.flatMap(r => App.util.entries(r));
     const rated = allE.filter(e => e.rating > 0);
     const avg = rated.length ? (rated.reduce((s, e) => s + e.rating, 0) / rated.length).toFixed(1) : '—';
-    const rewatched = records.filter(r => App.util.entries(r).length > 1).length;
+    const rewatched = list.filter(r => App.util.entries(r).length > 1).length;
     const joinedDays = Math.max(1, Math.round((Date.now() - new Date((profile.joinedAt || App.util.today()) + 'T00:00:00').getTime()) / 86400000));
     return [
-      { n: records.length, l: '看过电影' },
+      { n: list.length, l: '看过' + scopeName },
       { n: allE.length, l: '观影次数' },
       { n: rewatched, l: '二刷+部' },
       { n: avg, l: '平均评分' },
@@ -28,29 +29,37 @@ App.views.profile = (function () {
     ];
   }
 
-  function taste(records) {
+  function taste(list) {
     const cnt = {};
-    records.forEach(r => (r.tags || []).forEach(t => cnt[t] = (cnt[t] || 0) + 1));
+    list.forEach(r => (r.tags || []).forEach(t => cnt[t] = (cnt[t] || 0) + 1));
     return Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 8);
   }
 
   async function render(param, root) {
     const records = await App.db.getRecords();
-    const cards = statCards(records);
-    const tasteList = taste(records);
+    const list = media === 'all' ? records : records.filter(r => (App.util.isTv(r) ? 'tv' : 'movie') === media);
+    const scopeName = media === 'tv' ? '剧集' : (media === 'movie' ? '电影' : '影音');
+    const cards = statCards(list, scopeName);
+    const tasteList = taste(list);
     const nickname = profile.nickname || '影迷';
     const bio = profile.bio || '这里写一句你的观影宣言吧～';
 
     root.innerHTML = `
       <div class="profile-head">
         <div class="avatar ${avatarUrl ? '' : 'ph'}" id="avatarBox">
-          ${avatarUrl ? `<img src="${avatarUrl}" alt="">` : '👤'}
+          ${avatarUrl ? `<img src="${avatarUrl}" alt="">` : App.util.icon('person', { size: 38, sw: 1.6 })}
         </div>
         <div class="p-info">
           <div class="p-name" id="nicknameTxt">${App.util.escapeHtml(nickname)}</div>
           <div class="p-bio" id="bioTxt">${App.util.escapeHtml(bio)}</div>
-          <button class="btn sm" id="editProfile" style="margin-top:8px">✏️ 编辑资料</button>
+          <button class="btn sm" id="editProfile" style="margin-top:8px">${App.util.icon('pencil', { size: 14 })} 编辑资料</button>
         </div>
+      </div>
+
+      <div class="seg media-seg" style="margin:6px 0 12px">
+        <button class="seg-btn ${media === 'all' ? 'active' : ''}" data-media="all">全部</button>
+        <button class="seg-btn ${media === 'movie' ? 'active' : ''}" data-media="movie">${App.util.icon('film', { size: 14 })}电影</button>
+        <button class="seg-btn ${media === 'tv' ? 'active' : ''}" data-media="tv">${App.util.icon('tv', { size: 14 })}剧集</button>
       </div>
 
       <div class="stat-cards" style="grid-template-columns:repeat(3,1fr);margin:6px 0 4px">
@@ -59,15 +68,19 @@ App.views.profile = (function () {
       </div>
 
       <div class="view-block">
-        <div class="section-title">🎯 我的观影偏好 <span class="hint">常看的标签</span></div>
+        <div class="section-title">${App.util.icon('heart', { size: 16 })}我的观影偏好 <span class="hint">常看的标签</span></div>
         ${tasteList.length
           ? `<div class="chips">${tasteList.map(([t, n]) => `<span class="chip tag">${App.util.escapeHtml(t)} · ${n}</span>`).join('')}</div>`
-          : '<div class="muted">还没有标签数据，去电影里加几个标签吧</div>'}
+          : '<div class="muted">还没有标签数据，去影片里加几个标签吧</div>'}
       </div>
 
-      <p class="muted" style="text-align:center;margin-top:6px">观影手记 · 你的私人电影日记</p>
+      <p class="muted" style="text-align:center;margin-top:6px">观影手记 · 你的私人影音日记</p>
     `;
 
+    root.querySelectorAll('.media-seg .seg-btn').forEach(b => b.onclick = () => {
+      media = b.dataset.media;
+      render(param, root);
+    });
     root.querySelector('#avatarBox').onclick = () => pickAvatar(root);
     root.querySelector('#editProfile').onclick = () => editProfile(root);
   }
