@@ -61,7 +61,7 @@ App.assistant = (function () {
     div.className = 'chat-msg ' + (role === 'user' ? 'me' : 'bot');
     const txt = App.util.escapeHtml(String(text));
     div.innerHTML = role === 'user'
-      ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">👤</span>'
+      ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">' + App.util.icon('person', { size: 17 }) + '</span>'
       : '<span class="avatar bot-av"></span><div class="bubble">' + txt + '</div>';
     box.appendChild(div);
     box.scrollTop = box.scrollHeight;
@@ -76,7 +76,7 @@ App.assistant = (function () {
       div.className = 'chat-msg ' + (m.role === 'user' ? 'me' : 'bot');
       const txt = App.util.escapeHtml(String(m.content));
       div.innerHTML = m.role === 'user'
-        ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">👤</span>'
+        ? '<div class="bubble">' + txt + '</div><span class="avatar me-av">' + App.util.icon('person', { size: 17 }) + '</span>'
         : '<span class="avatar bot-av"></span><div class="bubble">' + txt + '</div>';
       box.appendChild(div);
     });
@@ -146,7 +146,7 @@ App.assistant = (function () {
         method: 'POST', headers,
         body: JSON.stringify({ model: 'hermes', stream: false, max_tokens: 16, messages: [{ role: 'user', content: 'ping' }] })
       });
-      if (r.ok) return '连接成功 ✅';
+      if (r.ok) return '连接成功';
       return '连接失败（HTTP ' + r.status + '）' + (r.status === 403 ? '：多为 CORS 未放行' : (r.status === 401 ? '：API Key 不对' : ''));
     } catch (e) {
       return '连接失败：' + e.message + '（请确认 Hermes 已开启 API 网关）';
@@ -234,7 +234,7 @@ App.chatWin = (function () {
           <div class="chat-name">Hermes 观影助手</div>
           <div class="chat-status">在线</div>
         </div>
-        <button class="chat-reset" id="cwReset" title="开启新对话">↺</button>
+        <button class="chat-reset" id="cwReset" title="开启新对话">${App.util.icon('reset', { size: 15 })}</button>
         <button class="chat-close" id="cwClose" title="收起">—</button>
       </div>
       <div class="chat-msgs" id="cwMsgs"></div>
