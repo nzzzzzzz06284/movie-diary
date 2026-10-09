@@ -68,10 +68,11 @@ App.views.edit = (function () {
           <span>季 · 第</span><button type="button" class="stp" id="tvEMinus">−</button><span class="stp-val" id="tvE">${rec.tv ? (rec.tv.episode || 0) : 0}</span><button type="button" class="stp" id="tvEPlus">＋</button><span>集</span>
         </div>
         <div class="tv-info" id="tvInfo"></div>
-        <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="tvDone" ${rec.tv && rec.tv.completed ? 'checked' : ''}> ✅ 标记已看完</label>
+        <div class="field" style="margin:8px 0 0"><label>这一集看到（分:秒，选填）</label><input type="text" id="tvTime" inputmode="numeric" placeholder="如 13:12" value="${rec.tv && rec.tv.timeInEpisode ? App.util.escapeHtml(rec.tv.timeInEpisode) : ''}"></div>
+        <label class="unk-toggle" style="margin-top:8px"><input type="checkbox" id="tvDone" ${rec.tv && rec.tv.completed ? 'checked' : ''}> 标记已看完</label>
       </div>` : ''}
       <div class="field"><label>电影名</label><input type="text" id="fTitle" value="${App.util.escapeHtml(rec.title || '')}" placeholder="电影名"></div>
-      ${key ? `<button class="btn sm block" id="tmdbFill" style="margin-bottom:12px">🔍 联网补全资料（按片名搜 TMDB）</button>` : `<div class="muted" style="margin-bottom:12px">未配置 TMDB 密钥，可在“设置”里填写后自动补全资料。</div>`}
+      ${key ? `<button class="btn sm block" id="tmdbFill" style="margin-bottom:12px">${App.util.icon('search', { size: 14 })} 联网补全资料（按片名搜 TMDB）</button>` : `<div class="muted" style="margin-bottom:12px">未配置 TMDB 密钥，可在“设置”里填写后自动补全资料。</div>`}
       <div class="field"><label>海报链接 / 上传</label><div class="row"><input type="text" id="fPoster" value="${App.util.escapeHtml(rec.posterUrl || '')}" placeholder="图片网址"><input type="file" id="fPosterFile" accept="image/*" style="flex:0 0 auto"></div></div>
       <div class="field"><label>简介</label><textarea id="fOverview" placeholder="剧情简介">${App.util.escapeHtml(rec.overview || '')}</textarea></div>
       <div class="row">
@@ -141,11 +142,13 @@ App.views.edit = (function () {
     if (isTv) {
       const tvS = document.getElementById('tvS'), tvE = document.getElementById('tvE');
       const tvDone = document.getElementById('tvDone'), tvInfo = document.getElementById('tvInfo');
+      const tvTime = document.getElementById('tvTime');
       rec.tv = rec.tv || { season: 1, episode: 0, completed: false, totalEpisodes: 0, totalSeasons: 0, seasons: [] };
       const syncTv = () => {
         rec.tv.season = parseInt(tvS.textContent, 10) || 1;
         rec.tv.episode = parseInt(tvE.textContent, 10) || 0;
         rec.tv.completed = !!tvDone.checked;
+        rec.tv.timeInEpisode = tvTime ? (tvTime.value || '').trim() : (rec.tv.timeInEpisode || '');
         if (tvInfo) tvInfo.textContent = App.util.tvLabel(rec);
         scheduleSave();
       };
@@ -155,6 +158,7 @@ App.views.edit = (function () {
       document.getElementById('tvEMinus').onclick = () => stepN(tvE, -1, 0);
       document.getElementById('tvEPlus').onclick = () => stepN(tvE, 1, 0);
       tvDone.onchange = syncTv;
+      if (tvTime) tvTime.addEventListener('input', syncTv);
       syncTv();
     }
     let entriesData = (App.util.entries(rec).length ? App.util.entries(rec) : [{ seq: 1, watchDate: App.util.today(), rating: 0, review: '', comment: '', quotes: [] }])
