@@ -58,9 +58,12 @@ App.views.list = (function () {
       if (tv) {
         if (st === 'watching') {
           const pct = App.util.tvProgressPct(r);
+          const t = r.tv || {};
+          let txt = '第' + (t.episode || 0) + '集';
+          if (t.timeInEpisode) txt += ' · ' + t.timeInEpisode;
           statusRow = `<div class="tv-prog">
           ${pct != null ? `<div class="tv-prog-bar"><i style="width:${pct}%"></i></div>` : ''}
-          <div class="tv-status watching">${App.util.icon('play', { size: 11, sw: 2.2 })}在看 · ${App.util.escapeHtml(App.util.tvProgressText(r))}</div>
+          <div class="tv-prog-txt">${App.util.icon('play', { size: 10, sw: 2.4 })} ${App.util.escapeHtml(txt)}</div>
         </div>`;
         } else if (st === 'watched') {
           statusRow = `<div class="tv-status watched">${App.util.icon('check', { size: 12, sw: 2 })}已看完</div>`;
