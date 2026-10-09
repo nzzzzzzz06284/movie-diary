@@ -123,19 +123,34 @@ App.sync = (function () {
 
   // 发送 GitHub 请求：先直连；若被网络/CORS 预检拦截（fetch 抛错），自动改走中继（若已配置）
   async function ghFetch(url, opts, token, proxy) {
+    // —— 直连（带 Authorization 头，环境允许时最稳）——
+    let directErr = null;
     try {
       const r = await fetch(url, opts);
       lastVia = '直连';
       return r;
-    } catch (e) { /* 直连被拦，试中继 */ }
-    if (!proxy) throw new Error('直连失败（无中继）');
+    } catch (e) { directErr = (e && e.message) || ('' + e); }
+
+    if (!proxy) throw new Error('直连失败（无中继）：' + directErr);
+
+    // —— 中继：令牌走 ?t= 参数、去掉 Authorization 头、Content-Type 降到简单头，彻底避免跨域预检被网络拦截 ——
     try {
       const sep = proxy.includes('?') ? '&' : '?';
-      const proxied = proxy + sep + 'u=' + encodeURIComponent(url);
+      const proxied = proxy + sep + 'u=' + encodeURIComponent(url) + '&t=' + encodeURIComponent(token);
+      const relayOpts = Object.assign({}, opts);
+      if (relayOpts.headers) {
+        relayOpts.headers = Object.assign({}, relayOpts.headers);
+        delete relayOpts.headers.Authorization;
+        delete relayOpts.headers.authorization;
+        // application/json 是非简单头会触发预检；改成 text/plain 可保持「简单请求」不预检
+        if (relayOpts.headers['Content-Type'] && relayOpts.headers['Content-Type'].indexOf('application/json') === 0) {
+          relayOpts.headers['Content-Type'] = 'text/plain';
+        }
+      }
       lastVia = '中继';
-      return await fetch(proxied, opts);
+      return await fetch(proxied, relayOpts);
     } catch (e2) {
-      throw new Error('直连与中继均失败');
+      throw new Error('直连失败：' + directErr + '；中继也失败：' + ((e2 && e2.message) || ('' + e2)));
     }
   }
 
