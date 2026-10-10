@@ -6,6 +6,7 @@ App.views.list = (function () {
   let state = { query: '', tags: new Set(), year: '', selecting: false, selSet: new Set(), media: 'all', tvFilter: 'all' };
   let records = [];
   let key = '';
+  let curRoot = null, curParam = null;   // 当前 root/param，供子控件重渲染
   let suppressClick = false; // 长按进入多选后抑制紧随的 click，避免刚勾选又被取消
   let srSeq = 0;             // 搜索序号：慢的旧结果不许盖掉新一次搜索（否则"搜一次就搜不了了"）
 
@@ -43,17 +44,31 @@ App.views.list = (function () {
     if (state.year) list = list.filter(r => App.util.watchDates(r).some(d => d.slice(0, 4) === state.year));
     if (state.tags.size) list = list.filter(r => (r.tags || []).some(t => state.tags.has(t)));
 
+    // 「想看」的剧集在当前视图被隐藏时给个入口，避免"加了却找不到"
+    const wantHidden = (state.media === 'all' || (state.media === 'tv' && state.tvFilter === 'all'))
+      ? records.filter(r => App.util.isTv(r) && App.util.tvStatus(r) === 'want').length : 0;
+    const wantHint = wantHidden
+      ? `<div class="want-hint" id="wantHint">${App.util.icon('bookmark', { size: 13 })}另有 ${wantHidden} 部「想看」的剧集 · 点此查看</div>` : '';
+    const bindWantHint = () => {
+      const wh = document.getElementById('wantHint');
+      if (wh) wh.onclick = () => { state.media = 'tv'; state.tvFilter = 'want'; render(curParam, curRoot); };
+    };
+
     if (!list.length) {
       const base = state.query || state.tags.size || state.year || state.media !== 'all' || state.tvFilter !== 'all';
       const word = state.media === 'tv' ? '剧集' : (state.media === 'movie' ? '电影' : '影片');
-      box.innerHTML = `<div class="empty"><div class="big">${App.util.icon(state.media === 'tv' ? 'tv' : 'film', { size: 44, sw: 1.4 })}</div>${base ? '没有匹配的' + word : '还没有记录，去搜索或点右下角 ＋ 添加'}</div>`;
+      box.innerHTML = wantHint + `<div class="empty"><div class="big">${App.util.icon(state.media === 'tv' ? 'tv' : 'film', { size: 44, sw: 1.4 })}</div>${base ? '没有匹配的' + word : '还没有记录，去搜索或点右下角 ＋ 添加'}</div>`;
+      bindWantHint();
       return;
     }
     const sel = state.selSet;
-    box.innerHTML = `<div class="movie-grid ${state.selecting ? 'selecting' : ''}">` + list.map(r => {
+    box.innerHTML = wantHint + `<div class="movie-grid ${state.selecting ? 'selecting' : ''}">` + list.map(r => {
       const isSel = sel.has(r.id);
       const tv = App.util.isTv(r);
       const st = App.util.tvStatus(r);
+      const dateTxt = App.util.dateShort(App.util.latestWatch(r));
+      const rewatch = App.util.watchCount(r) > 1 ? App.util.watchCount(r) + '刷' : '';
+      const metaLeft = [dateTxt, rewatch].filter(Boolean).join(' · ');
       let statusRow = '';
       if (tv) {
         if (st === 'watching') {
@@ -77,7 +92,7 @@ App.views.list = (function () {
         ${posterBlock(r.posterUrl)}
         <div class="body">
           <p class="name">${App.util.escapeHtml(r.title)}</p>
-          <div class="meta"><span>${App.util.dateShort(App.util.latestWatch(r)) || (App.util.entries(r).some(e => e.dateUnknown) ? '记不清了' : '')}${(App.util.watchCount(r) > 1) ? ' · ' + App.util.watchCount(r) + '刷' : ''}</span>${App.util.latestRating(r) ? `<span class="rate-num">${App.util.ratingText(App.util.latestRating(r))}</span>` : ''}</div>
+          <div class="meta"><span>${metaLeft}</span>${App.util.latestRating(r) ? `<span class="rate-num">${App.util.ratingText(App.util.latestRating(r))}</span>` : ''}</div>
           ${statusRow}
         </div>
       </div>`;
@@ -92,11 +107,12 @@ App.views.list = (function () {
           const ck = c.querySelector('.check'); if (ck) ck.classList.toggle('on');
           updateListBatch();
         } else {
-          // 搜索状态下点结果 → 直接进入编辑（用户要搜到自己的电影并改时间等）；浏览状态下 → 进详情
+          // 搜索状态下点结果 → 直接进入编辑；浏览状态下 → 进详情
           App.router.go((state.query ? '#/edit/' : '#/detail/') + id);
         }
       };
     });
+    bindWantHint();
     const cnt = document.getElementById('listCountHint');
     if (cnt) cnt.textContent = list.length + ' 部';
   }
@@ -147,7 +163,11 @@ App.views.list = (function () {
     }).join('');
     box.querySelectorAll('.result-row').forEach(r => r.onclick = () => {
       if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
-      quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over }, true);
+      // 加入后停留在搜索结果里，方便继续搜下一部（不跳转）
+      quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over }, true, () => {
+        r.classList.add('added');
+        const a = r.querySelector('.sr-action'); if (a) a.innerHTML = '<span class="badge-done">已在库</span>';
+      });
     });
   }
 
@@ -162,7 +182,7 @@ App.views.list = (function () {
   }
 
   // 快速加入：选观影时间（首刷）+ 快速评分，点确定即入库
-  function quickAdd(seed, enrich) {
+  function quickAdd(seed, enrich, onAdded) {
     seed = seed || {};
     // 包装成与下拉「＋」一致的字段（poster 兼容 posterUrl）
     seed = Object.assign({}, seed, { poster: seed.poster || seed.posterUrl });
@@ -237,7 +257,7 @@ App.views.list = (function () {
         const s = mask.querySelector('#qaS'), e = mask.querySelector('#qaE'), done = mask.querySelector('#qaDone');
         rec.tv = { season: parseInt(s.textContent, 10) || 1, episode: parseInt(e.textContent, 10) || 0, completed: !!(done && done.checked), totalEpisodes: 0, totalSeasons: 0, seasons: [] };
       }
-      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入' + (isTv ? '剧集库' : '影音库')); App.audio.sfx('success'); App.router.go('#/detail/' + r.id); });
+      const finish = (r) => App.db.saveRecord(r).then(() => { mask.remove(); App.util.toast('已加入' + (isTv ? '剧集库' : '影音库')); App.audio.sfx('success'); if (onAdded) onAdded(r); });
       // 点选时自动补全导演 / 演员，确保资料正确
       if (enrich && seed.tmdbId && key) {
         const enricher = isTv ? App.tmdb.tvDetails(seed.tmdbId, key) : App.tmdb.details(seed.tmdbId, key);
@@ -278,6 +298,7 @@ App.views.list = (function () {
   }
 
   function render(param, root) {
+    curRoot = root; curParam = param;
     root.innerHTML = `
       <div class="view-block search-wrap">
         <div class="search-bar">
