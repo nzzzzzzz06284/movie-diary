@@ -214,13 +214,13 @@ App.views.discover = (function () {
       </div>`;
     }).join('');
     box.querySelectorAll('.result-row').forEach(r => {
-      // 右侧「＋」：一键入库
+      const markAdded = () => { r.classList.add('added'); const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入'; };
+      // 右侧「＋」：一键入库（不跳转）
       const addBtn = r.querySelector('.sr-add');
       if (addBtn) addBtn.onclick = (e) => {
         e.stopPropagation();
         if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         const seed = { tmdbId: r.dataset.tmdb, title: r.dataset.title, poster: r.dataset.poster, year: r.dataset.year, overview: r.dataset.over };
-        const markAdded = () => { r.classList.add('added'); const b = r.querySelector('.sr-add'); if (b) b.textContent = '已加入'; };
         const isTv = state.mediaType === 'tv';
         const opts = { tmdbId: seed.tmdbId, title: seed.title, poster: seed.poster, year: seed.year, overview: seed.overview, alreadyInLibrary: () => inLibrary(seed) };
         if (isTv) {
@@ -238,11 +238,11 @@ App.views.discover = (function () {
           App.util.addToLibrary(opts).then(markAdded);
         }
       };
-      // 点行身：进弹窗补全日期/评分（资料更全）
+      // 点行身：进弹窗补全日期/评分（资料更全）—— 加入后停留在搜索界面，方便继续搜
       r.onclick = () => {
         if (r.classList.contains('added')) { App.util.toast('这部已在你的影音库'); return; }
         if (App.views && App.views.list && App.views.list.quickAdd) {
-          App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over, mediaType: state.mediaType === 'tv' ? 'tv' : 'movie' }, true);
+          App.views.list.quickAdd({ tmdbId: r.dataset.tmdb, title: r.dataset.title, year: r.dataset.year, posterUrl: r.dataset.poster, overview: r.dataset.over, mediaType: state.mediaType === 'tv' ? 'tv' : 'movie' }, true, markAdded);
         }
       };
     });
